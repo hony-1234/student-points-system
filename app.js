@@ -4841,7 +4841,7 @@ function renderPrefectDutyScreen() {
     const display = document.getElementById('prefect-selected-location-display');
     if (!grid) return;
     
-    const locations = window.DEFAULT_PREFECT_LOCATIONS || ["前座禮堂", "前座一棲", "前座二棲", "後座禮堂", "後座二樓", "後座三樓", "後座四樓"];
+    const locations = window.DEFAULT_PREFECT_LOCATIONS || ["前座禮堂", "前座一樓", "前座二樓", "後座禮堂", "後座二樓", "後座三樓", "後座四樓"];
     
     if (!state.selectedDutyLocation || !locations.includes(state.selectedDutyLocation)) {
         state.selectedDutyLocation = locations[0];
@@ -4853,8 +4853,8 @@ function renderPrefectDutyScreen() {
     
     const iconMap = {
         "前座禮堂": "🎭",
-        "前座一棲": "🏫",
-        "前座二棲": "🏫",
+        "前座一樓": "🏫",
+        "前座二樓": "🏫",
         "後座禮堂": "🎭",
         "後座二樓": "🚶",
         "後座三樓": "🚶",
@@ -4990,7 +4990,7 @@ function handleDownloadPrefectTemplate() {
         },
         {
             "星期 (Day 1-5)": 1,
-            "當值位置": "前座一棲",
+            "當值位置": "前座一樓",
             "應到時間 (HH:MM)": "07:45",
             "應退時間 (HH:MM)": "08:00",
             "容差分鐘數 (預設5)": 5,
@@ -5000,7 +5000,7 @@ function handleDownloadPrefectTemplate() {
         },
         {
             "星期 (Day 1-5)": 2,
-            "當值位置": "前座二棲",
+            "當值位置": "前座二樓",
             "應到時間 (HH:MM)": "07:50",
             "應退時間 (HH:MM)": "08:05",
             "容差分鐘數 (預設5)": 5,

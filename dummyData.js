@@ -663,8 +663,8 @@ window.YEARS_LIST = YEARS_LIST;
 // 風紀當值報到系統預置數據
 const DEFAULT_PREFECT_LOCATIONS = [
     "前座禮堂",
-    "前座一棲",
-    "前座二棲",
+    "前座一樓",
+    "前座二樓",
     "後座禮堂",
     "後座二樓",
     "後座三樓",
@@ -674,10 +674,10 @@ const DEFAULT_PREFECT_LOCATIONS = [
 const DEFAULT_PREFECT_SCHEDULES = [
     // 星期一 (Day 1)
     { id: "sched_1_gate_20261002", day: 1, location: "前座禮堂", startTime: "07:45", endTime: "08:00", graceMinutes: 5, studentId: "20261002", studentName: "陳樂暄", class: "1A" },
-    { id: "sched_1_playground_20261004", day: 1, location: "前座一棲", startTime: "07:45", endTime: "08:00", graceMinutes: 5, studentId: "20261004", studentName: "陳詩語", class: "1A" },
+    { id: "sched_1_playground_20261004", day: 1, location: "前座一樓", startTime: "07:45", endTime: "08:00", graceMinutes: 5, studentId: "20261004", studentName: "陳詩語", class: "1A" },
     
     // 星期二 (Day 2)
-    { id: "sched_2_library_20261005", day: 2, location: "前座二棲", startTime: "07:50", endTime: "08:05", graceMinutes: 5, studentId: "20261005", studentName: "陳子樂", class: "1A" },
+    { id: "sched_2_library_20261005", day: 2, location: "前座二樓", startTime: "07:50", endTime: "08:05", graceMinutes: 5, studentId: "20261005", studentName: "陳子樂", class: "1A" },
     
     // 星期三 (Day 3)
     { id: "sched_3_corridor1_20261008", day: 3, location: "後座禮堂", startTime: "08:00", endTime: "08:15", graceMinutes: 5, studentId: "20261008", studentName: "徐諾希", class: "1A" },
