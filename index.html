@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="全方位智能校園積分及禮品超市自助終端。支持 RFID 智能卡即時感應發分、學生自助積分餘額查詢與獎品兌換、教師庫存管理及多工作表 Excel 數據報表一鍵導出。">
+    <title>天主教善導小學積點系統</title>
+    
+    <!-- 引入樣式與圖標庫 -->
+    <link rel="stylesheet" href="styles.css?v=1.1.9">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- 引入第三方大庫（標準非模塊瀏覽器版，避免本地 file:// 協議 CORS 跨域限制，支持雙擊點開即用） -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+    <div class="app-container">
+        
+        <!-- 頂部導航及數據庫狀態欄 -->
+        <header style="flex-direction: column; align-items: stretch; gap: 14px; padding: 12px 40px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 16px;">
+                <div class="logo-section">
+                    <div class="logo-icon" style="background: linear-gradient(135deg, #ff4e50, #f9d423); box-shadow: 0 0 15px rgba(249, 212, 35, 0.4);">
+                        <span style="font-size: 20px;">🌟</span>
+                    </div>
+                    <div class="logo-text">
+                        <h1 style="background: linear-gradient(to right, #312e81, #7c3aed, #db2777, #ea580c); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; font-size: 22px;">天主教善導小學積點系統 🌟</h1>
+                        <span style="font-size: 11px; color: var(--secondary); letter-spacing: 0.5px; font-weight: 700;">✨ 閃耀積分與神奇自助寶藏超市 ✨</span>
+                    </div>
+                </div>
+
+                <nav class="nav-links">
+                    <button class="nav-btn" data-tab="portal" id="nav-return-portal" style="font-weight: 800; gap: 6px; background: rgba(100, 116, 139, 0.08); border: 1.5px solid rgba(100, 116, 139, 0.15); color: #475569; border-radius: var(--radius-md);">
+                        ⬅️ 返回大廳
+                    </button>
+                    <button class="nav-btn active" data-tab="award-points" id="nav-award-points" style="font-weight: 700; gap: 6px;">
+                        👩‍🏫 老師加分能量站
+                    </button>
+                    <button class="nav-btn" data-tab="student-profile" id="nav-student-profile" style="font-weight: 700; gap: 6px;">
+                        🌟 學生自助查詢能量站
+                    </button>
+                    <button class="nav-btn" data-tab="student-shop" id="nav-student-shop" style="font-weight: 700; gap: 6px;">
+                        🛍️ 神奇寶物自助兌換超市
+                    </button>
+                    <button class="nav-btn" data-tab="presents-inventory" id="nav-presents-inventory" style="font-weight: 700; gap: 6px;">
+                        🎁 神奇禮物寶物庫
+                    </button>
+                    <button class="nav-btn" data-tab="summary-reports" id="nav-summary-reports" style="font-weight: 700; gap: 6px;">
+                        📊 閃耀榮譽統計大殿
+                    </button>
+                    <button class="nav-btn" data-tab="guidance-discipline" id="nav-guidance-discipline" style="font-weight: 700; gap: 6px;">
+                        🛡️ 🛡️ 訓輔魔法大加分
+                    </button>
+                </nav>
+            </div>
+
+            <!-- 數據庫狀態欄，置於第二行置右對齊，氣質高雅且易於點擊 -->
+            <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; width: 100%;">
+                <button id="skip-to-local-btn" style="display: none; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: #d97706; padding: 6px 14px; border-radius: var(--radius-full); font-size: 12px; font-weight: 700; cursor: pointer; transition: all 0.2s; white-space: nowrap;" onclick="forceLocalMode()">
+                    ⚡ 點此跳過並使用本地獨立模式
+                </button>
+                <div class="db-status" id="db-status-bar" title="點擊配置雲端數據庫同步 (Google Firestore)" style="box-shadow: 0 2px 10px rgba(168, 85, 247, 0.08);">
+                    <div class="status-dot" id="status-dot"></div>
+                    <span id="status-text">本地獨立數據庫模式</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+
+            <!-- 視窗 0：歡迎終端門戶大廳 -->
+            <section class="screen active" id="portal-screen">
+                <div class="portal-wrapper">
+                    <div class="portal-logo-section">
+                        <div class="portal-logo-icon">🌟</div>
+                        <h1 class="portal-title">天主教善導小學</h1>
+                        <p class="portal-subtitle">✨ 閃耀智慧校園積點 & 自助超市終端大廳 ✨</p>
+                    </div>
+
+                    <div class="portal-grid">
+                        <!-- 卡片 1：學生自助終端 -->
+                        <div class="portal-card student" id="portal-card-student">
+                            <div class="portal-card-badge">自助服務</div>
+                            <div class="portal-card-icon">🛍️</div>
+                            <h3>學生自助終端</h3>
+                            <p>感應您的學生智能卡，即可一鍵查詢可用積點餘額、兌換神奇獎品、或查看榮譽大數據榜單！</p>
+                            <div class="portal-features">
+                                <span class="feature-tag">🔮 嗶卡餘額查詢</span>
+                                <span class="feature-tag">🎁 自助禮品兌換</span>
+                                <span class="feature-tag">🏆 榮譽龍虎榜單</span>
+                            </div>
+                            <button class="portal-btn student" id="enter-student-terminal-btn">
+                                進入學生自助終端 <i class="fas fa-arrow-right"></i>
+                            </button>
+                        </div>
+
+                        <!-- 卡片 2：教師管理終端 -->
+                        <div class="portal-card teacher" id="portal-card-teacher">
+                            <div class="portal-card-badge">行政管理</div>
+                            <div class="portal-card-icon">👩‍🏫</div>
+                            <h3>教師管理終端</h3>
+                            <p>進行學生嗶卡嘉許加分、訓輔魔法集體加分、禮品上架與盤點，以及導出多維度 Excel 統計報表。</p>
+                            <div class="portal-features">
+                                <span class="feature-tag">⚡ 教師刷卡加分</span>
+                                <span class="feature-tag">🛡️ 訓輔魔法大加分</span>
+                                <span class="feature-tag">📊 匯出/批次匯入 Excel</span>
+                            </div>
+                            
+                            <!-- 預設按鈕 -->
+                            <button class="portal-btn teacher" id="portal-teacher-verify-trigger">
+                                登入教師管理終端 <i class="fas fa-lock"></i>
+                            </button>
+
+                            <!-- 滑出的密碼輸入區 -->
+                            <div class="portal-pin-wrapper" id="portal-pin-wrapper" style="display: none;">
+                                <label for="portal-passcode">請輸入教師驗證密碼</label>
+                                <div style="display: flex; gap: 8px; width: 100%;">
+                                    <input type="password" id="portal-passcode" class="input-style" placeholder="請輸入 6 位數管理密碼" maxlength="12">
+                                    <button class="btn-style success" id="portal-pin-submit-btn" style="padding: 10px 18px;">驗證</button>
+                                </div>
+                                <button class="portal-pin-cancel" id="portal-pin-cancel-btn">取消</button>
+                            </div>
+                        </div>
+
+                        <!-- 卡片 3：風紀當值報到系統 -->
+                        <div class="portal-card prefect" id="portal-card-prefect">
+                            <div class="portal-card-badge">風紀專用</div>
+                            <div class="portal-card-icon">🛡️</div>
+                            <h3>風紀當值報到系統</h3>
+                            <p>風紀隊員到崗嗶卡登記，智能核對當值位置與時間表，自動記錄考勤（遲到/準時）並統計存檔。</p>
+                            <div class="portal-features">
+                                <span class="feature-tag">📍 當值位置登記</span>
+                                <span class="feature-tag">⏰ 智能班表比對</span>
+                                <span class="feature-tag">📋 今日報到歷史</span>
+                            </div>
+                            <button class="portal-btn prefect" id="enter-prefect-terminal-btn">
+                                進入當值報到系統 <i class="fas fa-arrow-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 視窗 8：風紀當值報到系統 -->
+            <section class="screen" id="prefect-duty-screen">
+                <div class="prefect-container" style="max-width: 1200px; margin: 0 auto; padding: 20px;">
+                    <div class="prefect-header glass-card" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-radius: var(--radius-md);">
+                        <div style="display: flex; align-items: center; gap: 16px;">
+                            <button class="btn-style secondary" id="prefect-back-lobby-btn" style="padding: 10px 20px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                                <i class="fas fa-arrow-left"></i> 返回大廳
+                            </button>
+                            <div class="prefect-logo-icon" style="font-size: 2rem;">🛡️</div>
+                            <div>
+                                <h2 style="margin: 0; font-size: 1.6rem; color: var(--text-main);">風紀當值報到系統</h2>
+                                <p style="margin: 4px 0 0 0; font-size: 0.9rem; color: var(--text-muted);">風紀隊員請先選擇今日【當值位置】，再嗶卡感應進行到崗登記</p>
+                            </div>
+                        </div>
+                        <div class="prefect-clock-wrapper" style="text-align: right;">
+                            <div id="prefect-live-clock" style="font-size: 1.8rem; font-weight: 800; color: var(--secondary); font-family: monospace; letter-spacing: 1px;">00:00:00</div>
+                            <div id="prefect-live-date" style="font-size: 0.9rem; color: var(--text-muted); margin-top: 4px;">2026年08月31日 星期一</div>
+                        </div>
+                    </div>
+
+                    <div class="prefect-grid" style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 24px; margin-top: 24px;">
+                        <!-- 左側：崗位選擇面板 -->
+                        <div class="glass-card" style="padding: 24px;">
+                            <h3 style="margin-top: 0; margin-bottom: 16px; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                                <i class="fas fa-map-marker-alt" style="color: var(--secondary);"></i> 1. 請選擇您的【當值位置】
+                            </h3>
+                            <div class="duty-location-grid" id="duty-location-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+                                <!-- 動態渲染位置卡片 -->
+                            </div>
+                        </div>
+
+                        <!-- 右側：刷卡感應與考勤反饋 -->
+                        <div class="glass-card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between; align-items: center; text-align: center; min-height: 380px;">
+                            <h3 style="margin-top: 0; margin-bottom: 8px; color: var(--text-main); width: 100%; text-align: left; display: flex; align-items: center; gap: 8px;">
+                                <i class="fas fa-id-card" style="color: var(--secondary);"></i> 2. 嗶卡登記到崗
+                            </h3>
+                            
+                            <!-- 當前選中的位置指示 -->
+                            <div style="background: rgba(168, 85, 247, 0.08); border: 1.5px dashed var(--secondary); padding: 12px 24px; border-radius: var(--radius-sm); margin-bottom: 16px; width: 100%;">
+                                <span style="font-size: 0.85rem; color: var(--text-muted); display: block; text-transform: uppercase; letter-spacing: 1px;">當前選定崗位</span>
+                                <strong id="prefect-selected-location-display" style="font-size: 1.4rem; color: var(--secondary);">學校大門</strong>
+                            </div>
+
+                            <!-- 刷卡感應反饋區 -->
+                            <div class="prefect-swipe-feedback-area" id="prefect-swipe-feedback-area" style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; width: 100%;">
+                                <div class="prefect-rfid-pulse-icon" style="font-size: 4.5rem; margin-bottom: 16px; animation: pulse 2s infinite;">📡</div>
+                                <p style="font-size: 1.1rem; font-weight: 700; color: var(--text-main); margin: 0;">請將學生智能卡放至感應器上</p>
+                                <p style="font-size: 0.85rem; color: var(--text-muted); margin: 6px 0 0 0;">（您亦可使用右下角的 RFID 模擬器點選風紀學生進行感應）</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 下方：今日報到考勤歷史 -->
+                    <div class="glass-card" style="margin-top: 24px; padding: 24px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3 style="margin: 0; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+                                <i class="fas fa-history" style="color: var(--secondary);"></i> 今日當值報到考勤日誌
+                            </h3>
+                            <span class="badge" id="prefect-today-count-badge" style="background: var(--secondary); color: white; padding: 6px 12px; font-weight: 700; font-size: 0.85rem;">今日已報到：0 人次</span>
+                        </div>
+                        <div class="table-wrapper" style="max-height: 300px; overflow-y: auto;">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>報到時間</th>
+                                        <th>學號</th>
+                                        <th>班級</th>
+                                        <th>姓名</th>
+                                        <th>當值位置</th>
+                                        <th>應到時間</th>
+                                        <th>考勤狀態</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="prefect-today-checkins-tbody">
+                                    <tr>
+                                        <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px 0;">
+                                            <i class="fas fa-info-circle"></i> 暫無今日報到記錄。請風紀隊員到崗後進行刷卡。
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 視窗 1：教師發放積分 -->
+            <section class="screen" id="award-points-screen">
+                <div class="page-header">
+                    <div class="page-title">
+                        <h2>教師發放加分點數</h2>
+                        <p>【自動感應加分模式】請先在左側控制面板中設定點數與特質原因，隨後讓學生直接感應刷卡，系統將自動累加發放！</p>
+                    </div>
+                </div>
+
+                <div class="grid-main-side">
+                    <!-- 左欄：控制加分面板 -->
+                    <div class="glass-card" style="display: flex; flex-direction: column; gap: 20px;">
+                        <h3 class="text-gradient-purple" style="font-size: 18px; font-weight: 700;">積分發放控制面板</h3>
+                        
+                        <div class="scan-area-container">
+                            <div class="scan-radar">
+                                <div class="radar-circle"></div>
+                                <div class="radar-circle"></div>
+                                <div class="radar-circle"></div>
+                                <div class="radar-core">
+                                    <i class="fas fa-broadcast-tower"></i>
+                                </div>
+                            </div>
+                            <span style="font-size: 13px; color: var(--text-muted); font-weight: 500;">等待 RFID 學生智能卡感應...</span>
+                        </div>
+
+                        <div>
+                            <label style="display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 10px; font-weight: 700;">🌟 選擇嘉許積點 🌟</label>
+                            <div class="point-presets">
+                                <button class="preset-btn active" data-val="1">⭐ +1</button>
+                                <button class="preset-btn" data-val="2">⭐ +2</button>
+                                <button class="preset-btn" data-val="5">⭐ +5</button>
+                                <button class="preset-btn" data-val="10">⭐ +10</button>
+                            </div>
+                            
+                             <div class="form-group" style="margin-bottom: 0;">
+                                <input type="number" id="custom-points-input" class="input-style" placeholder="✨ 或輸入其它神奇積點數..." min="0.01" step="any">
+                            </div>
+                        </div>
+
+                            <label style="display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 10px; font-weight: 600;">選擇特質</label>
+                            <div class="category-selection" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px;">
+                                <!-- Consolidated Dropdown -->
+                                <div class="dropdown-wrapper">
+                                    <div class="category-chip active" id="indicators-chip" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                        <i class="fas fa-medal" style="color: #8b5cf6;"></i>
+                                        <span id="selected-indicator-label">達成指標</span>
+                                        <i class="fas fa-chevron-down" style="font-size: 10px; opacity: 0.6; margin-left: 4px;"></i>
+                                    </div>
+                                    <div class="dropdown-content" style="min-width: 280px; padding: 4px 0;">
+                                        <div class="dropdown-item" data-val="樂觀知足，常懷喜樂" data-display="😊 樂觀知足，常懷喜樂" style="border-left: 4px solid #f97316; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">😊</span> 樂觀知足，常懷喜樂</div>
+                                        <div class="dropdown-item" data-val="健康自律，愛惜生命" data-display="❤️ 健康自律，愛惜生命" style="border-left: 4px solid #ef4444; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">❤️</span> 健康自律，愛惜生命</div>
+                                        <div class="dropdown-item" data-val="珍惜光陰，發揮才能" data-display="⏳ 珍惜光陰，發揮才能" style="border-left: 4px solid #3b82f6; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">⏳</span> 珍惜光陰，發揮才能</div>
+                                        <div class="dropdown-item" data-val="主動反思，知足感恩" data-display="💡 主動反思，知足感恩" style="border-left: 4px solid #eab308; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">💡</span> 主動反思，知足感恩</div>
+                                        <div class="dropdown-item" data-val="孝敬長輩，關愛家人" data-display="🏠 孝敬長輩，關愛家人" style="border-left: 4px solid #22c55e; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">🏠</span> 孝敬長輩，關愛家人</div>
+                                        <div class="dropdown-item" data-val="尊重勞動，真誠付出" data-display="🤝 尊重勞動，真誠付出" style="border-left: 4px solid #6366f1; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">🤝</span> 尊重勞動，真誠付出</div>
+                                        <div class="dropdown-item" data-val="參與義工，回饋社區" data-display="💖 參與義工，回饋社區" style="border-left: 4px solid #ec4899; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">💖</span> 參與義工，回饋社區</div>
+                                        <div class="dropdown-item" data-val="欣賞文化，感念先賢" data-display="🏛️ 欣賞文化，感念先賢" style="border-left: 4px solid #a855f7; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">🏛️</span> 欣賞文化，感念先賢</div>
+                                        <div class="dropdown-item" data-val="心繫家國，實踐責任" data-display="🇲國家 心繫家國，實踐責任" style="border-left: 4px solid #dc2626; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">🇲國家</span> 心繫家國，實踐責任</div>
+                                        <div class="dropdown-item" data-val="愛護地球，關懷世界" data-display="🌏 愛護地球，關懷世界" style="border-left: 4px solid #06b6d4; padding-left: 14px; margin: 4px 8px; border-radius: 4px;"><span style="font-size: 16px; margin-right: 4px;">🌏</span> 愛護地球，關懷世界</div>
+                                    </div>
+                                </div>
+
+                                <!-- Class-based buttons -->
+                                <div class="category-chip" data-val="學業">
+                                    <i class="fas fa-graduation-cap" style="color: #3b82f6;"></i> 學業
+                                </div>
+                                <div class="category-chip" data-val="宗德">
+                                    <i class="fas fa-cross" style="color: #ec4899;"></i> 宗德
+                                </div>
+                                <div class="category-chip" data-val="體育">
+                                    <i class="fas fa-running" style="color: #f97316;"></i> 體育
+                                </div>
+                                <div class="category-chip" data-val="視藝">
+                                    <i class="fas fa-palette" style="color: #eab308;"></i> 視藝
+                                </div>
+                                <div class="category-chip" data-val="圖書">
+                                    <i class="fas fa-book" style="color: #10b981;"></i> 圖書
+                                </div>
+                                <div class="category-chip" data-val="普通話">
+                                    <i class="fas fa-comments" style="color: #06b6d4;"></i> 普通話
+                                </div>
+                                <div class="category-chip" data-val="English">
+                                    <i class="fas fa-language" style="color: #ec4899;"></i> English
+                                </div>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <input type="text" id="custom-reason-input" class="input-style" placeholder="✍️ 或親自寫下其它讚賞小評語...">
+                            </div>
+
+                        <button class="btn-style secondary" id="teacher-award-btn" disabled style="width: 100%; padding: 14px; font-size: 14px; background: rgba(168, 85, 247, 0.05); color: var(--text-muted); border: 1.5px solid rgba(168, 85, 247, 0.15); cursor: default;">
+                            <i class="fas fa-exclamation-circle" style="color: #ef4444;"></i> ✨ 魔法感應模式：請先選好積點和特質
+                        </button>
+                    </div>
+
+                    <!-- 右欄：動態識別學生卡與實時日誌 -->
+                    <div style="display: flex; flex-direction: column; gap: 24px;">
+                        <div class="glass-card">
+                            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--secondary);">✨ 當前感應登入的同學 ✨</h3>
+                            <div id="scanned-student-profile">
+                                <!-- 由 app.js 動態加載 -->
+                            </div>
+                        </div>
+
+                        <div class="glass-card" style="flex: 1; display: flex; flex-direction: column;">
+                            <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--text-main);">📜 魔法感應器實時電波日誌</h3>
+                            <div class="console-box" id="console-log-box" style="flex: 1;">
+                                <!-- 動態刷卡與寫入成功語句 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 視窗 2A：學生自助查詢能量站 -->
+            <section class="screen" id="student-profile-screen">
+                <div id="student-profile-display-body">
+                    <!-- 由 app.js 動態渲染 -->
+                </div>
+            </section>
+
+            <!-- 視窗 2B：神奇寶物自助兌換超市 (全自動免確認收銀) -->
+            <section class="screen" id="student-shop-screen">
+                <div id="kiosk-display-body">
+                    <!-- 由 app.js 動態讀寫刷卡狀態 -->
+                </div>
+            </section>
+
+            <!-- 視窗 3：獎品庫存規格管理 -->
+            <section class="screen" id="presents-inventory-screen">
+                <div class="page-header">
+                    <div class="page-title">
+                        <h2>🎁 獎勵寶物神奇上架與存貨管理 🎁</h2>
+                        <p>老師們可以在這裡上架最受學生歡迎的寶貝禮物、設定積點值、調整存量，隨時更新最新玩具或書籍！</p>
+                    </div>
+                    <button class="btn-style" id="add-gift-trigger-btn">
+                        <i class="fas fa-plus-circle"></i> ✨ ✨ 上架神奇新禮物
+                    </button>
+                </div>
+
+                <div class="glass-card">
+                    <div class="inventory-grid" id="inventory-manager-grid">
+                        <!-- 動態渲染列表 -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- 視窗 4：數據統計與導出中心 -->
+            <section class="screen" id="summary-reports-screen">
+                <div class="page-header">
+                    <div class="page-title">
+                        <h2>👑 全校閃耀大數據分析看板 👑</h2>
+                        <p>一目了然掌握全校同學的閃亮成就！可依據年級、班級或同學，精準統計積點，並一鍵導出多工作表的 Excel 自動排表！</p>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                        <button class="btn-style secondary" id="report-template-btn" title="下載 Excel 匯入學生名冊的空白範本表格">
+                            <i class="fas fa-file-download"></i> 下載匯入範本
+                        </button>
+                        <button class="btn-style secondary" id="report-import-trigger-btn" style="background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.2); color: var(--primary);">
+                            <i class="fas fa-file-import"></i> 批次匯入學生 Excel
+                        </button>
+                        <input type="file" id="report-import-file" accept=".xlsx, .xls" style="display: none;">
+                        
+                        <button class="btn-style success" id="report-export-btn">
+                            <i class="fas fa-file-excel"></i> 一鍵導出 Excel 總報表
+                        </button>
+                        
+                        <button class="btn-style danger" id="admin-clear-all-btn" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); color: var(--danger);" title="清空全校所有學生的現有積分、兌換紀錄，並排空所有交易歷史流水">
+                            <i class="fas fa-trash-alt"></i> 🧹 智能清空全校積分與流水
+                        </button>
+                    </div>
+                </div>
+
+                <!-- KPI指標網格 -->
+                <div class="summary-stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-globe"></i></div>
+                        <div class="stat-info-text">
+                            <h4 id="stat-total-points">0</h4>
+                            <p>全校累計發放積分</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-wallet"></i></div>
+                        <div class="stat-info-text">
+                            <h4 id="stat-active-balance">0</h4>
+                            <p>現存可用點數總餘額</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-shopping-cart"></i></div>
+                        <div class="stat-info-text">
+                            <h4 id="stat-total-redeemed">0</h4>
+                            <p>累計已承兌點數</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="fas fa-chart-line"></i></div>
+                        <div class="stat-info-text">
+                            <h4 id="stat-average-points">0</h4>
+                            <p>學生平均點數得分</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 數據報表大表格 -->
+                <div class="glass-card">
+                    <div class="reports-tabs-header">
+                        <button class="report-tab-btn active" data-report-tab="by-students">學生積分榜</button>
+                        <button class="report-tab-btn" data-report-tab="students-by-class">班級學生數據</button>
+                        <button class="report-tab-btn" data-report-tab="class-matrix">班級學生成就矩陣</button>
+                        <button class="report-tab-btn" data-report-tab="library-leaderboard">📚 圖書龍虎榜</button>
+                        <button class="report-tab-btn" data-report-tab="sports-leaderboard">🏃 體育龍虎榜</button>
+                        <button class="report-tab-btn" data-report-tab="by-classes">班級數據摘要</button>
+                        <button class="report-tab-btn" data-report-tab="by-years">年級數據摘要</button>
+                        <button class="report-tab-btn" data-report-tab="by-reasons">指標達成排行</button>
+                        <button class="report-tab-btn" data-report-tab="transactions">全校歷史交易日誌</button>
+                        <button class="report-tab-btn" data-report-tab="prefect-duty-log">🛡️ 風紀報到考勤日誌</button>
+                    </div>
+
+                    <div class="table-filter-bar">
+                        <div class="search-box-wrapper">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="report-search-input" class="input-style" placeholder="搜索姓名、卡片 ID 或操作原因...">
+                        </div>
+                        <div class="filter-selects">
+                            <select id="report-class-filter" class="input-style" style="width: auto;">
+                                <option value="">所有班級</option>
+                            </select>
+                            <select id="report-year-filter" class="input-style" style="width: auto;">
+                                <option value="">所有年級</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="reports-table-container">
+                        <!-- 由 app.js 動態彙總繪製 Table -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- 視窗 5：訓輔魔法大加分 -->
+            <section class="screen" id="guidance-discipline-screen">
+                <div class="page-header">
+                    <div class="page-title">
+                        <h2 class="text-gradient-purple" style="font-size: 26px; font-weight: 800; display: flex; align-items: center; gap: 8px;">🛡️ 訓輔魔法大加分大殿 🛡️</h2>
+                        <p>【全體班級/年級魔法嘉許模式】訓輔老師可以直接在這裡為全班或全年級同學集體施放魔法積點，激勵優良品格，無需逐一感應刷卡！</p>
+                    </div>
+                </div>
+
+                <div class="grid-main-side">
+                    <!-- 左欄：控制面板 -->
+                    <div class="glass-card" style="display: flex; flex-direction: column; gap: 20px; border: 1.5px solid rgba(168, 85, 247, 0.25);">
+                        <h3 style="font-size: 18px; font-weight: 800; color: #db2777; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(168, 85, 247, 0.12); padding-bottom: 12px; margin-bottom: 4px;">
+                            <span>🔮</span> 訓輔魔法控制面板
+                        </h3>
+
+                        <!-- 選擇加分維度 (Class or Year) -->
+                        <div class="form-group">
+                            <label style="font-weight: 800; font-size: 13px; color: var(--text-main); margin-bottom: 8px; display: block;">1️⃣ 選擇大嘉許範圍</label>
+                            <div class="form-group-radio" style="display: flex; gap: 12px; margin-bottom: 16px;">
+                                <button class="chip-btn active" id="gd-scope-class" style="flex: 1; padding: 12px; font-weight: 800; text-align: center; border-radius: 12px; font-size: 14px; border: 1.5px solid rgba(168,85,247,0.15);">按班級集體嘉許 🏫</button>
+                                <button class="chip-btn" id="gd-scope-year" style="flex: 1; padding: 12px; font-weight: 800; text-align: center; border-radius: 12px; font-size: 14px; border: 1.5px solid rgba(168,85,247,0.15);">按年級全體嘉許 🎓</button>
+                            </div>
+
+                            <!-- Selector Chips based on scope -->
+                            <div id="gd-class-selector-wrapper" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; background: rgba(168, 85, 247, 0.03); padding: 12px; border-radius: 12px; border: 1px solid rgba(168,85,247,0.08);">
+                                <!-- Dynamically populated class buttons -->
+                            </div>
+                            <div id="gd-year-selector-wrapper" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; background: rgba(168, 85, 247, 0.03); padding: 12px; border-radius: 12px; border: 1px solid rgba(168,85,247,0.08); display: none;">
+                                <!-- Dynamically populated year buttons -->
+                            </div>
+                        </div>
+
+                        <!-- 選擇特質原因 -->
+                        <div class="form-group">
+                            <label style="font-weight: 800; font-size: 13px; color: var(--text-main); margin-bottom: 8px; display: block;">2️⃣ 選擇卓越行為特質</label>
+                            <div class="category-grid" id="gd-category-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                                <!-- Dynamically populated Virtue indicators -->
+                            </div>
+                            <div class="form-group" style="margin-top: 14px; margin-bottom: 0;">
+                                <input type="text" id="gd-custom-reason" class="input-style" placeholder="✍️ 或親自寫下其它訓輔專屬讚賞評語..." style="border: 1.5px solid rgba(168, 85, 247, 0.18);">
+                            </div>
+                        </div>
+
+                        <!-- 魔法發射按鈕組 -->
+                        <div class="form-group" style="margin-bottom: 0; border-top: 1px solid rgba(168, 85, 247, 0.12); padding-top: 16px;">
+                            <label style="font-weight: 800; font-size: 13px; color: var(--text-main); margin-bottom: 10px; display: block;">3️⃣ 施放魔法積點能量（點擊立即生效！）</label>
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
+                                <button class="btn-style" id="gd-award-1" data-pts="1" style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 14px; font-weight: 900; font-size: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(16,185,129,0.3); border: none; cursor: pointer; transition: transform 0.2s;">
+                                    ✨ 賜予 +1 點
+                                </button>
+                                <button class="btn-style" id="gd-award-2" data-pts="2" style="background: linear-gradient(135deg, #06b6d4, #0891b2); color: white; padding: 14px; font-weight: 900; font-size: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(6,182,212,0.3); border: none; cursor: pointer; transition: transform 0.2s;">
+                                    🌈 賜予 +2 點
+                                </button>
+                                <button class="btn-style" id="gd-award-5" data-pts="5" style="background: linear-gradient(135deg, #a855f7, #9333ea); color: white; padding: 14px; font-weight: 900; font-size: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(168,85,247,0.3); border: none; cursor: pointer; transition: transform 0.2s;">
+                                    🔥 賜予 +5 點
+                                </button>
+                                <button class="btn-style" id="gd-award-10" data-pts="10" style="background: linear-gradient(135deg, #ec4899, #db2777); color: white; padding: 14px; font-weight: 900; font-size: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(236,72,153,0.3); border: none; cursor: pointer; transition: transform 0.2s;">
+                                    👑 賜予 +10 點
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右欄：受獎學生名單實時預覽大廳 -->
+                    <div style="display: flex; flex-direction: column; gap: 24px;">
+                        <div class="glass-card" style="flex: 1; display: flex; flex-direction: column; gap: 16px; border: 1.5px solid rgba(168, 85, 247, 0.25);">
+                            <h3 style="font-size: 17px; font-weight: 800; color: var(--secondary); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(168, 85, 247, 0.12); padding-bottom: 12px; margin-bottom: 0;">
+                                <span style="display: flex; align-items: center; gap: 6px;">💖 受獎幸運星名單 (<span id="gd-preview-count">0</span> 人) 💖</span>
+                                <span style="font-size: 13px; color: #d97706; background: rgba(217, 119, 6, 0.08); padding: 4px 12px; border-radius: 20px; border: 1px solid rgba(217, 119, 6, 0.15);" id="gd-preview-target-name">未選擇對象</span>
+                            </h3>
+                            <div id="gd-student-preview-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; max-height: 480px; overflow-y: auto; padding-right: 4px; padding-bottom: 8px;">
+                                <!-- Dynamically rendered student preview cards -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- 輔助測試：浮動式 RFID 智能卡模擬讀取面板 -->
+        <div class="simulator-panel" id="simulator-panel" style="display: none;">
+            <div class="sim-header" id="sim-toggle-header">
+                <h4><i class="fas fa-id-card"></i> RFID 智能卡感應模擬器</h4>
+                <i class="fas fa-chevron-up sim-toggle-icon"></i>
+            </div>
+            <div class="sim-body">
+                <p class="sim-desc">
+                    <b>開發與展示提示：</b><br>
+                    為了便於您在本地沒有物理 RFID 讀卡器硬件時進行演示和調試，可直接點擊下方任意學生名單，即可模擬發起「硬件刷卡」感應事件。
+                </p>
+                
+                <div id="sim-student-list" style="display: flex; flex-direction: column; gap: 8px;">
+                    <!-- 由 app.js 自動印出可點擊名單 -->
+                </div>
+
+                <div class="sim-manual-input">
+                    <label style="display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; color: var(--text-muted); font-weight: 600;">手動刷入自定義卡片號碼</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="sim-manual-id-field" class="input-style" placeholder="輸入8位自定義卡號..." style="flex: 1; padding: 6px 10px; font-size: 13px;">
+                        <button class="btn-style" id="sim-manual-input-btn" style="padding: 6px 12px; font-size: 12px;">刷入</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 全局吐司彈窗框 -->
+        <div class="toast-container" id="toast-container"></div>
+
+    </div> <!-- 應用主包裹器 -->
+
+
+    <!-- =========================================================================
+         全體模態彈窗 (Modals)
+         ========================================================================= -->
+
+    <!-- 彈窗 1：新增/編輯獎品表單 -->
+    <div class="modal-overlay" id="add-gift-modal">
+        <div class="modal-content">
+            <button class="modal-close"><i class="fas fa-times"></i></button>
+            <div class="modal-header">
+                <h3 id="gift-modal-title">上架全新獎品</h3>
+                <p>配置獎品的名稱、兌換所需的點數以及初始庫存數量。</p>
+            </div>
+            <form id="gift-form">
+                <input type="hidden" id="gift-form-id">
+                
+                <div class="form-group">
+                    <label for="gift-form-name">獎勵品名稱 *</label>
+                    <input type="text" id="gift-form-name" class="input-style" placeholder="例如：多功能硬殼筆袋" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="gift-form-desc">簡短功能介紹描述</label>
+                    <textarea id="gift-form-desc" class="input-style" placeholder="例如：防震雙層設計，內置大容量網格分類層。" style="height: 60px; resize: none;"></textarea>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label for="gift-form-cost">兌換所需點數 *</label>
+                        <input type="number" id="gift-form-cost" class="input-style" placeholder="分值" min="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="gift-form-stock">上架庫存件數 *</label>
+                        <input type="number" id="gift-form-stock" class="input-style" placeholder="件數" min="0" required>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label>禮品外觀圖片 *</label>
+                    <div class="image-upload-wrapper">
+                        <input type="file" id="gift-form-file" accept="image/*">
+                        <div id="preview-box-wrapper">
+                            <i class="fas fa-cloud-upload-alt" style="font-size: 24px; color: var(--primary); margin-bottom: 6px;"></i>
+                            <p style="font-size: 12px; color: var(--text-muted);">點擊或拖拽圖片至此上傳 custom 照片</p>
+                        </div>
+                        <img id="form-img-preview" class="upload-preview" alt="禮品預覽圖">
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                    <button type="button" class="btn-style secondary" id="gift-form-cancel">取消</button>
+                    <button type="submit" class="btn-style">確認並保存上架</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 彈窗 2：學生獎勵品承兌確認彈窗 -->
+    <div class="modal-overlay" id="redeem-confirm-modal">
+        <div class="modal-content" style="max-width: 420px; text-align: center;">
+            <button class="modal-close"><i class="fas fa-times"></i></button>
+            <div class="modal-header" style="margin-bottom: 0;">
+                <i class="fas fa-gift" style="font-size: 42px; color: var(--warning); margin-bottom: 16px;"></i>
+                <h3>核對禮品兌換訂單</h3>
+                <p id="redeem-confirm-desc" style="color: var(--text-main); font-size: 14px; line-height: 1.6; margin-top: 10px; margin-bottom: 24px;">
+                    <!-- 由 app.js 動態載入 -->
+                </p>
+            </div>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button type="button" class="btn-style secondary" id="modal-cancel-redeem">取消</button>
+                <button type="button" class="btn-style success" id="modal-confirm-redeem">確定兌換</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 彈窗 2B：學生自助扣除積點成功特效彈窗 -->
+    <div class="modal-overlay" id="shop-success-modal">
+        <div class="modal-content" style="max-width: 480px; text-align: center; border: 3px solid var(--success); background: radial-gradient(circle at top, rgba(16,185,129,0.08), #fff); box-shadow: 0 20px 50px rgba(16,185,129,0.25);">
+            <button class="modal-close" id="shop-success-close-btn"><i class="fas fa-times"></i></button>
+            <div style="font-size: 64px; animation: bounce 1.2s infinite; margin: 10px 0 20px 0;">🎉</div>
+            <h2 class="text-gradient-purple" style="font-size: 26px; font-weight: 900; margin-bottom: 8px;">自動兌換扣除成功！</h2>
+            <div id="shop-success-content" style="margin: 16px 0; color: #1e1b4b;">
+                <!-- 由 app.js 動態注入 -->
+            </div>
+            <!-- 自動倒計時條 -->
+            <div style="width: 100%; height: 6px; background: rgba(0,0,0,0.05); border-radius: 3px; margin: 24px 0 16px 0; overflow: hidden; position: relative;">
+                <div id="shop-success-timer-bar" style="width: 100%; height: 100%; background: linear-gradient(90deg, #10b981, #34d399); transition: width 5s linear;"></div>
+            </div>
+            <button type="button" class="btn-style success" id="shop-success-ok-btn" style="width: 100%; font-weight: 800; font-size: 15px; padding: 12px;">太棒了，完成！✨</button>
+        </div>
+    </div>
+
+    <!-- 彈窗 3：FIREBASE 雲端同步控制面板 -->
+    <div class="modal-overlay" id="firebase-config-modal">
+        <div class="modal-content">
+            <button class="modal-close"><i class="fas fa-times"></i></button>
+            <div class="modal-header">
+                <h3>Google Firebase 雲端配置參數</h3>
+                <p>配置您的 Google Firestore Credentials 以將本地點數系統無縫對接到您學校的雲端生產環境。</p>
+            </div>
+            <form id="fb-form">
+                <div class="form-group">
+                    <label for="fb-api-key">API Key *</label>
+                    <input type="text" id="fb-api-key" class="input-style" placeholder="例如：AIzaSy..." required>
+                </div>
+                <div class="form-group">
+                    <label for="fb-project-id">Project ID *</label>
+                    <input type="text" id="fb-project-id" class="input-style" placeholder="例如：school-merits-xxxx" required>
+                </div>
+                <div class="form-group">
+                    <label for="fb-app-id">App ID *</label>
+                    <input type="text" id="fb-app-id" class="input-style" placeholder="例如：1:xxxxxx:web:xxxxxx" required>
+                </div>
+                <div class="grid-3">
+                    <div class="form-group">
+                        <label for="fb-auth-domain">Auth Domain</label>
+                        <input type="text" id="fb-auth-domain" class="input-style" placeholder="可選填">
+                    </div>
+                    <div class="form-group">
+                        <label for="fb-storage-bucket">Storage Bucket</label>
+                        <input type="text" id="fb-storage-bucket" class="input-style" placeholder="可選填">
+                    </div>
+                    <div class="form-group">
+                        <label for="fb-messaging-sender">Msg Sender ID</label>
+                        <input type="text" id="fb-messaging-sender" class="input-style" placeholder="可選填">
+                    </div>
+                </div>
+                
+                <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 24px; line-height: 1.4;">
+                    <strong>安全與權限須知：</strong><br>
+                    您的 Google Firebase 項目必須啟動 <strong>Firestore Database</strong>。若對接的雲端數據庫沒有預置名冊，本應用會自動為您雲端 seeding 寫入基礎班級學生及默認禮品目錄，無需手動建表！
+                </p>
+
+                <div style="display: flex; gap: 12px; justify-content: space-between;">
+                    <button type="button" class="btn-style secondary" id="fb-disconnect-btn" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); color: var(--danger);">
+                        <i class="fas fa-unlink"></i> 斷開連接並還原本地
+                    </button>
+                    <div style="display: flex; gap: 12px;">
+                        <button type="button" class="btn-style secondary" id="fb-form-cancel">取消</button>
+                        <button type="submit" class="btn-style"><i class="fas fa-plug"></i> 確認保存並聯動同步</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- =========================================================================
+         導入本地及第三方 ES 腳本
+         ========================================================================= -->
+    <script src="dummyData.js?v=1.1.20"></script>
+    <script src="app.js?v=1.1.20" defer></script>
+
+</body>
+</html>
