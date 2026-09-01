@@ -98,13 +98,13 @@ const DB = {
     },
 
     initLocalStorage() {
-        // 自動升級與遷移：若檢測到歷史舊數據（如 '一年級' 傳統班級名稱），則自動重置為最新 P.1-P.6 學制
+        // 自動升級與遷移：若檢測到歷史舊數據，自動重置為最新 P.1-P.6 全校 572 名學生 @mail.gccps.edu.hk 名冊
         let needReset = false;
         try {
             const rawStudents = localStorage.getItem('student_points_db_students');
             if (rawStudents) {
                 const parsed = JSON.parse(rawStudents);
-                if (Array.isArray(parsed) && (parsed.length < 500 || parsed.some(s => s.points > 0) || parsed.some(s => s.year === '一年級' || s.year === '二年級'))) {
+                if (Array.isArray(parsed) && (parsed.length < (window.DEFAULT_STUDENTS ? window.DEFAULT_STUDENTS.length : 570) || parsed.some(s => s.email && s.email.includes('@gmail.com')) || parsed.some(s => s.year === '一年級' || s.year === '二年級'))) {
                     needReset = true;
                 }
             }
@@ -1361,44 +1361,60 @@ async function forceClearAllScoresAndTransactions() {
 // 智能對接 Google 電郵與學籍
 async function autoLoginStudentByGoogle(email) {
     if (!email) return;
-    const lowerEmail = email.toLowerCase();
+    const lowerEmail = email.toLowerCase().trim();
+    const prefix = lowerEmail.split('@')[0].trim();
+    const cleanPrefix = prefix.replace(/^s/i, '');
     
-    // 優先精確匹配 email 屬性
-    let student = state.students.find(s => s.email && s.email.toLowerCase() === lowerEmail);
+    // 1. 優先精確匹配 email 屬性
+    let student = state.students.find(s => s.email && s.email.toLowerCase().trim() === lowerEmail);
     
-    // 若無精確匹配，嘗試用學籍前綴智能匹配 (包含 id、barcode 或 studentNum)
+    // 2. 次優先匹配 studentNum (如 s261002)
+    if (!student) {
+        student = state.students.find(s => s.studentNum && s.studentNum.toLowerCase().trim() === prefix);
+    }
+    
+    // 3. 若無精確匹配，嘗試用學籍前綴智能匹配 (包含 id、barcode 或 studentNum)
     if (!student) {
         student = state.students.find(s => {
             const cleanId = s.id ? s.id.trim().replace(/^0+/, '').toLowerCase() : '';
             const cleanBarcode = s.barcode ? s.barcode.trim().replace(/^0+/, '').toLowerCase() : '';
             const cleanStudentNum = s.studentNum ? s.studentNum.trim().toLowerCase() : '';
             
-            return (cleanId && lowerEmail.includes(cleanId)) || 
-                   (cleanBarcode && lowerEmail.includes(cleanBarcode)) || 
-                   (cleanStudentNum && lowerEmail.includes(cleanStudentNum));
+            return (cleanStudentNum && (cleanStudentNum === prefix || lowerEmail.includes(cleanStudentNum))) ||
+                   (cleanId && (cleanId === prefix || cleanId === cleanPrefix || lowerEmail.includes(cleanId))) || 
+                   (cleanBarcode && (cleanBarcode === prefix || cleanBarcode === cleanPrefix || lowerEmail.includes(cleanBarcode)));
         });
         if (student) {
-            // 既然前綴配對成功，順便寫入 email 屬性以實施未來精確匹配，並持久化保存
-            student.email = email;
+            // 前綴配對成功，寫入電郵並持久化保存
+            student.email = lowerEmail;
             await DB.saveStudent(student);
             logConsole(`智能匹配：檢測到電郵前綴匹配學生 [${student.name}] 的學籍，自動完成學籍對接。`, "success");
         }
     }
     
     if (student) {
+        // 確保 student.email 記錄為該 Google 郵箱
+        if (student.email !== lowerEmail) {
+            student.email = lowerEmail;
+            await DB.saveStudent(student);
+        }
+
         state.kioskStudent = student;
-        showToast(`🎉 歡迎回來，${student.name} 同學！已登入 Google 帳號。`, "success");
+        state.userRole = 'student';
+        showToast(`🎉 歡迎回來，${student.class}班 ${student.number}號 ${student.name} 同學！已登入 Google 帳號。`, "success");
         triggerConfettiSmall();
         
         // 觸發畫面對應更新
-        if (state.activeTab === 'student-profile') {
-            renderStudentProfileKiosk();
-        } else if (state.activeTab === 'student-shop') {
+        if (state.activeTab === 'student-shop') {
             renderAutomatedShopKiosk();
+        } else {
+            switchTab('student-profile');
+            renderStudentProfileKiosk();
         }
     } else {
         // 未配對到任何學生，提示首次綁定並自動切換至學生個人面板分頁來顯示綁定表單
         state.kioskStudent = null;
+        state.userRole = 'student';
         if (state.activeTab !== 'student-profile') {
             switchTab('student-profile');
         }
@@ -1442,7 +1458,7 @@ async function handleGoogleSignIn() {
     }
 }
 
-// 離線本地模式下的高擬真 Google 選擇帳戶 Modal
+// 離線本地模式下的高擬真 Google 選擇帳戶 Modal (支援即時搜尋與全校學生名冊)
 function showSimulatedGoogleSignIn() {
     const existing = document.getElementById('mock-google-login-modal');
     if (existing) existing.remove();
@@ -1452,13 +1468,17 @@ function showSimulatedGoogleSignIn() {
     modal.className = 'modal-overlay active';
     modal.style.zIndex = '1010';
     
-    // 隨機選 3 名學生推薦，增加測試真實感
-    const sampleStudents = state.students.slice(0, 3);
+    // 精選不同年級代表學生，增加測試便利性
+    const sampleStudents = [
+        state.students.find(s => s.class === '1A') || state.students[0],
+        state.students.find(s => s.class === '3A') || state.students[100],
+        state.students.find(s => s.class === '6A') || state.students[450]
+    ].filter(Boolean);
     
     modal.innerHTML = `
-        <div class="modal-content" style="max-width: 440px; padding: 36px; border-radius: 16px; border: 1px solid rgba(0,0,0,0.08); box-shadow: 0 12px 36px rgba(139, 92, 246, 0.15); animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);">
-            <div style="text-align: center; margin-bottom: 24px;">
-                <div style="font-size: 24px; font-weight: 800; font-family: 'Product Sans', -apple-system, sans-serif; letter-spacing: -1.5px; display: inline-flex; align-items: center; gap: 2px;">
+        <div class="modal-content" style="max-width: 480px; padding: 32px; border-radius: 20px; border: 1px solid rgba(0,0,0,0.08); box-shadow: 0 16px 40px rgba(139, 92, 246, 0.18); animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div style="font-size: 26px; font-weight: 800; font-family: 'Product Sans', -apple-system, sans-serif; letter-spacing: -1.5px; display: inline-flex; align-items: center; gap: 2px;">
                     <span style="color: #4285F4;">G</span>
                     <span style="color: #EA4335;">o</span>
                     <span style="color: #FBBC05;">o</span>
@@ -1466,53 +1486,121 @@ function showSimulatedGoogleSignIn() {
                     <span style="color: #34A853;">l</span>
                     <span style="color: #EA4335;">e</span>
                 </div>
-                <h3 style="font-size: 19px; font-weight: 700; margin-top: 14px; color: #202124;">選擇帳戶</h3>
-                <p style="color: #5f6368; font-size: 13px; margin-top: 4px;">以繼續登入「善導小學積點系統」</p>
-                <div style="background: rgba(168, 85, 247, 0.06); border-radius: 8px; padding: 8px; font-size: 11px; color: #7c3aed; font-weight: 600; margin-top: 10px; border: 1px dashed rgba(168, 85, 247, 0.15);">
-                    💡 這是 [本地獨立數據庫] 離線演示仿真 Google 登入
+                <h3 style="font-size: 19px; font-weight: 700; margin-top: 10px; color: #202124;">選擇學生 Google 帳戶</h3>
+                <p style="color: #5f6368; font-size: 13px; margin-top: 4px;">登入「天主教善導小學積點系統」(@mail.gccps.edu.hk)</p>
+                <div style="background: rgba(168, 85, 247, 0.08); border-radius: 10px; padding: 8px 12px; font-size: 12px; color: #7c3aed; font-weight: 600; margin-top: 10px; border: 1px dashed rgba(168, 85, 247, 0.25);">
+                    💡 已接通全校 1A-6D 共 ${state.students.length} 名學生官方 Google Workspace 帳號
                 </div>
             </div>
+
+            <!-- 即時搜尋學生 -->
+            <div style="margin-bottom: 14px;">
+                <input type="text" id="mock-student-search-input" class="input-style" placeholder="🔍 輸入學生姓名、學號 (如 s261002) 或班別 (如 1A)..." style="width: 100%; padding: 10px 14px; font-size: 13px; border-radius: 12px; border: 1.5px solid rgba(139, 92, 246, 0.2);">
+            </div>
             
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; max-height: 240px; overflow-y: auto; padding-right: 4px;">
+            <div id="mock-accounts-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; max-height: 220px; overflow-y: auto; padding-right: 4px;">
                 ${sampleStudents.map(s => {
-                    // 若有預置 email 則用預置，否則構造學號電郵
-                    const mockEmail = s.email || `s${s.id}@gmail.com`;
+                    const mockEmail = s.email || `${s.studentNum || 's' + s.id}@mail.gccps.edu.hk`;
                     return `
-                        <div class="mock-google-account-row" data-email="${mockEmail}" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1.5px solid rgba(139, 92, 246, 0.08); border-radius: 12px; cursor: pointer; transition: all 0.2s; background: rgba(139, 92, 246, 0.02); text-align: left;">
-                            <div style="width: 34px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #ec4899); display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 14px;">
+                        <div class="mock-google-account-row" data-email="${mockEmail}" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1.5px solid rgba(139, 92, 246, 0.1); border-radius: 12px; cursor: pointer; transition: all 0.2s; background: rgba(139, 92, 246, 0.02); text-align: left;">
+                            <div style="width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #ec4899); display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 14px; shrink: 0;">
                                 ${s.name[0]}
                             </div>
-                            <div style="flex: 1;">
-                                <div style="font-size: 13.5px; font-weight: 700; color: #3c4043;">${s.name} (${s.class}班)</div>
-                                <div style="font-size: 11.5px; color: #70757a;">${mockEmail}</div>
+                            <div style="flex: 1; overflow: hidden;">
+                                <div style="font-size: 13.5px; font-weight: 700; color: #3c4043;">${s.name} ${s.nameEn ? `(${s.nameEn})` : ''} - <span style="color: #7c3aed;">${s.class}班 ${s.number}號</span></div>
+                                <div style="font-size: 11.5px; color: #70757a; font-family: monospace;">${mockEmail}</div>
                             </div>
-                            <div style="font-size: 10px; color: #4285f4; font-weight: 700; background: rgba(66,133,244,0.08); padding: 3px 6px; border-radius: 4px;">學生推薦</div>
+                            <div style="font-size: 10px; color: #4285f4; font-weight: 700; background: rgba(66,133,244,0.08); padding: 3px 6px; border-radius: 4px;">點擊登入</div>
                         </div>
                     `;
                 }).join('')}
-                
-                <div style="border-top: 1.5px solid #f1f3f4; margin: 12px 0 6px 0; padding-top: 12px;">
-                    <div style="font-size: 12.5px; font-weight: 700; color: #202124; margin-bottom: 8px; text-align: left;"><i class="fas fa-edit" style="color: var(--secondary); margin-right: 4px;"></i> 手動輸入自定義 Google 帳戶：</div>
-                    <div style="display: flex; gap: 8px;">
-                        <input type="email" id="mock-custom-email" class="input-style" placeholder="例如：mytest@gmail.com" style="flex: 1; padding: 10px; font-size: 13px; border: 1.5px solid rgba(139, 92, 246, 0.15); border-radius: 10px;">
-                        <button class="btn-style success" id="mock-custom-login-btn" style="background: linear-gradient(135deg, #8b5cf6, #6d28d9); color: white; border: none; padding: 0 16px; border-radius: 10px; font-weight: 800; font-size: 13px;">確認</button>
-                    </div>
+            </div>
+
+            <div style="border-top: 1.5px solid #f1f3f4; margin: 12px 0 10px 0; padding-top: 12px;">
+                <div style="font-size: 12.5px; font-weight: 700; color: #202124; margin-bottom: 8px; text-align: left;"><i class="fas fa-edit" style="color: var(--secondary); margin-right: 4px;"></i> 手動輸入自定義 Google 帳號 / 電郵：</div>
+                <div style="display: flex; gap: 8px;">
+                    <input type="email" id="mock-custom-email" class="input-style" placeholder="例如：s261002@mail.gccps.edu.hk" style="flex: 1; padding: 10px; font-size: 13px; border: 1.5px solid rgba(139, 92, 246, 0.15); border-radius: 10px;">
+                    <button class="btn-style success" id="mock-custom-login-btn" style="background: linear-gradient(135deg, #8b5cf6, #6d28d9); color: white; border: none; padding: 0 16px; border-radius: 10px; font-weight: 800; font-size: 13px; cursor: pointer;">登入</button>
                 </div>
             </div>
             
-            <button class="btn-style secondary" id="mock-google-close-btn" style="width: 100%; padding: 11px; border-radius: 12px; font-size: 13.5px; font-weight: 700; background: rgba(0,0,0,0.03); color: var(--text-muted); border: 1.5px solid rgba(0,0,0,0.05);">取消登入</button>
+            <button class="btn-style secondary" id="mock-google-close-btn" style="width: 100%; padding: 11px; border-radius: 12px; font-size: 13.5px; font-weight: 700; background: rgba(0,0,0,0.03); color: var(--text-muted); border: 1.5px solid rgba(0,0,0,0.05); cursor: pointer;">取消</button>
         </div>
     `;
     
     document.body.appendChild(modal);
-    
-    // 綁定推薦帳戶點擊
-    modal.querySelectorAll('.mock-google-account-row').forEach(row => {
-        row.addEventListener('click', () => {
-            const email = row.getAttribute('data-email');
-            completeSimulatedLogin(email);
+
+    const accountsContainer = modal.querySelector('#mock-accounts-container');
+    const searchInput = modal.querySelector('#mock-student-search-input');
+
+    const bindRows = () => {
+        modal.querySelectorAll('.mock-google-account-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const email = row.getAttribute('data-email');
+                completeSimulatedLogin(email);
+            });
         });
-    });
+    };
+
+    bindRows();
+
+    // 即時名冊搜尋
+    if (searchInput && accountsContainer) {
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim().toLowerCase();
+            if (!query) {
+                // 恢復推薦
+                accountsContainer.innerHTML = sampleStudents.map(s => {
+                    const mockEmail = s.email || `${s.studentNum || 's' + s.id}@mail.gccps.edu.hk`;
+                    return `
+                        <div class="mock-google-account-row" data-email="${mockEmail}" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1.5px solid rgba(139, 92, 246, 0.1); border-radius: 12px; cursor: pointer; transition: all 0.2s; background: rgba(139, 92, 246, 0.02); text-align: left;">
+                            <div style="width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #ec4899); display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 14px; shrink: 0;">
+                                ${s.name[0]}
+                            </div>
+                            <div style="flex: 1; overflow: hidden;">
+                                <div style="font-size: 13.5px; font-weight: 700; color: #3c4043;">${s.name} ${s.nameEn ? `(${s.nameEn})` : ''} - <span style="color: #7c3aed;">${s.class}班 ${s.number}號</span></div>
+                                <div style="font-size: 11.5px; color: #70757a; font-family: monospace;">${mockEmail}</div>
+                            </div>
+                            <div style="font-size: 10px; color: #4285f4; font-weight: 700; background: rgba(66,133,244,0.08); padding: 3px 6px; border-radius: 4px;">點擊登入</div>
+                        </div>
+                    `;
+                }).join('');
+                bindRows();
+                return;
+            }
+
+            const matched = state.students.filter(s => {
+                const n = (s.name || '').toLowerCase();
+                const ne = (s.nameEn || '').toLowerCase();
+                const cls = (s.class || '').toLowerCase();
+                const sn = (s.studentNum || '').toLowerCase();
+                const em = (s.email || '').toLowerCase();
+                const id = (s.id || '').toLowerCase();
+                return n.includes(query) || ne.includes(query) || cls.includes(query) || sn.includes(query) || em.includes(query) || id.includes(query);
+            }).slice(0, 10);
+
+            if (matched.length === 0) {
+                accountsContainer.innerHTML = `<div style="text-align: center; padding: 20px; color: #94a3b8; font-size: 13px;">找不到符合 "${query}" 的學生，可在下方手動輸入電郵</div>`;
+            } else {
+                accountsContainer.innerHTML = matched.map(s => {
+                    const mockEmail = s.email || `${s.studentNum || 's' + s.id}@mail.gccps.edu.hk`;
+                    return `
+                        <div class="mock-google-account-row" data-email="${mockEmail}" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1.5px solid rgba(139, 92, 246, 0.1); border-radius: 12px; cursor: pointer; transition: all 0.2s; background: rgba(139, 92, 246, 0.02); text-align: left;">
+                            <div style="width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #8b5cf6, #ec4899); display: flex; align-items: center; justify-content: center; color: white; font-weight: 800; font-size: 14px; shrink: 0;">
+                                ${s.name[0]}
+                            </div>
+                            <div style="flex: 1; overflow: hidden;">
+                                <div style="font-size: 13.5px; font-weight: 700; color: #3c4043;">${s.name} ${s.nameEn ? `(${s.nameEn})` : ''} - <span style="color: #7c3aed;">${s.class}班 ${s.number}號</span></div>
+                                <div style="font-size: 11.5px; color: #70757a; font-family: monospace;">${mockEmail}</div>
+                            </div>
+                            <div style="font-size: 10px; color: #4285f4; font-weight: 700; background: rgba(66,133,244,0.08); padding: 3px 6px; border-radius: 4px;">點擊登入</div>
+                        </div>
+                    `;
+                }).join('');
+                bindRows();
+            }
+        });
+    }
     
     // 綁定自定義輸入
     modal.querySelector('#mock-custom-login-btn').addEventListener('click', () => {
@@ -4336,6 +4424,88 @@ async function initApp() {
     // 1.2. 靜默執行數據自癒，移除舊有的測試虛擬賬號
     await cleanObsoleteDummyStudents();
 
+    // 1.3. 靜默執行 Google 電子郵箱與實際學籍一鍵對接 (Google accounts auto-migration & synchronization)
+    if (localStorage.getItem('student_emails_migrated_v130') !== 'done') {
+        try {
+            console.log("🚀 正在啟動 Google 帳號與學籍關聯數據同步對接程序...");
+            
+            const existingByNum = new Map();
+            const existingByName = new Map();
+            const existingById = new Map();
+            
+            state.students.forEach(s => {
+                if (s.studentNum) existingByNum.set(s.studentNum.toLowerCase().trim(), s);
+                if (s.name) existingByName.set(s.name.trim(), s);
+                if (s.id) existingById.set(s.id.trim(), s);
+            });
+            
+            const updatedStudents = [];
+            const idsSeen = new Set();
+            
+            (window.DEFAULT_STUDENTS || []).forEach(defS => {
+                const sNumKey = defS.studentNum ? defS.studentNum.toLowerCase().trim() : "";
+                const existing = existingByNum.get(sNumKey) || existingByName.get(defS.name.trim()) || existingById.get(defS.id.trim());
+                
+                let studentObj;
+                if (existing) {
+                    studentObj = {
+                        ...existing,
+                        id: existing.id || defS.id,
+                        email: defS.email,
+                        studentNum: defS.studentNum,
+                        nameEn: defS.nameEn || existing.nameEn || "",
+                        barcode: defS.barcode || existing.barcode || "",
+                        number: defS.number || existing.number || ""
+                    };
+                } else {
+                    studentObj = { ...defS };
+                }
+                
+                if (!idsSeen.has(studentObj.id)) {
+                    idsSeen.add(studentObj.id);
+                    updatedStudents.push(studentObj);
+                }
+            });
+            
+            // 將活動庫中剩餘的不在預設列表中的學生也保留
+            state.students.forEach(s => {
+                if (!idsSeen.has(s.id)) {
+                    idsSeen.add(s.id);
+                    updatedStudents.push(s);
+                }
+            });
+            
+            // 更新狀態機
+            state.students = updatedStudents;
+            
+            // 保存至 LocalStorage 或 Firestore
+            if (state.isFirebase) {
+                const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
+                let batch = writeBatch(state.firebaseDb);
+                let count = 0;
+                for (const student of updatedStudents) {
+                    const docRef = doc(state.firebaseDb, "students", student.id);
+                    batch.set(docRef, student, { merge: true });
+                    count++;
+                    if (count % 400 === 0) {
+                        await batch.commit();
+                        batch = writeBatch(state.firebaseDb);
+                    }
+                }
+                if (count % 400 !== 0) {
+                    await batch.commit();
+                }
+            } else {
+                localStorage.setItem('student_points_db_students', JSON.stringify(state.students));
+            }
+            
+            localStorage.setItem('student_emails_migrated_v130', 'done');
+            console.log(`✅ 成功關聯學籍！共完成 ${updatedStudents.length} 筆學生的 Google 帳箱關聯與同步對接。`);
+        } catch (e) {
+            console.error("❌ Google 帳號與學籍關聯對接時發生錯誤:", e);
+        }
+    }
+
     // 1.5. 【系統開學全新重置】若尚未完成 v1.1.11 積分與歷史一鍵清零，在此靜默執行
     if (localStorage.getItem('force_clear_scores_v121') !== 'done') {
         await forceClearAllScoresAndTransactions();
@@ -4361,6 +4531,11 @@ async function initApp() {
             switchTab('student-profile');
             showToast("已成功進入學生自助終端 🛍️", "info");
         });
+    }
+
+    const portalStudentGoogleBtn = document.getElementById('portal-student-google-btn');
+    if (portalStudentGoogleBtn) {
+        portalStudentGoogleBtn.addEventListener('click', handleGoogleSignIn);
     }
 
     const teacherVerifyTrigger = document.getElementById('portal-teacher-verify-trigger');
