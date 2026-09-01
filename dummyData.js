@@ -1095,7 +1095,7 @@ const DEFAULT_STUDENTS = [
     {
         "id": "0006450028",
         "name": "梁竣森",
-        "nameEn": "LEUNG CHUN SAM",
+        "nameEn": "LEUNG CHIN SAM",
         "class": "2B",
         "number": "10",
         "year": "P.2",
@@ -4409,7 +4409,7 @@ const DEFAULT_STUDENTS = [
     },
     {
         "id": "0011602188",
-        "name": "譚海恩",
+        "name": "裝海恩",
         "nameEn": "TAM HOI YAN",
         "class": "4D",
         "number": "17",
@@ -6178,7 +6178,7 @@ const DEFAULT_STUDENTS = [
     {
         "id": "0005729654",
         "name": "王思皓",
-        "nameEn": "WONG SZE HO",
+        "nameEn": "WANG SZE HO",
         "class": "6A",
         "number": "22",
         "year": "P.6",

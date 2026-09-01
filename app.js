@@ -4183,6 +4183,87 @@ function initGuidanceDiscipline() {
     });
 }
 
+async function migrateStudentEmailsAndRosterFirestore() {
+    if (state.isFirebase && state.firebaseDb && localStorage.getItem('student_emails_migrated_v132_firestore') !== 'done') {
+        try {
+            console.log("🚀 正在啟動 Firestore 雲端 Google 帳號與學籍座號同步對接程序 (v132)...");
+            
+            const existingByNum = new Map();
+            const existingByName = new Map();
+            const existingById = new Map();
+            
+            state.students.forEach(s => {
+                if (s.studentNum) existingByNum.set(s.studentNum.toLowerCase().trim(), s);
+                if (s.name) existingByName.set(s.name.trim(), s);
+                if (s.id) existingById.set(s.id.trim(), s);
+            });
+            
+            const updatedStudents = [];
+            const idsSeen = new Set();
+            
+            (window.DEFAULT_STUDENTS || []).forEach(defS => {
+                const sNumKey = defS.studentNum ? defS.studentNum.toLowerCase().trim() : "";
+                const existing = existingByNum.get(sNumKey) || existingByName.get(defS.name.trim()) || existingById.get(defS.id.trim());
+                
+                let studentObj;
+                if (existing) {
+                    studentObj = {
+                        ...existing,
+                        id: existing.id || defS.id,
+                        name: defS.name,
+                        nameEn: defS.nameEn || existing.nameEn || "",
+                        class: defS.class,
+                        number: defS.number,
+                        email: defS.email,
+                        studentNum: defS.studentNum,
+                        barcode: defS.barcode || existing.barcode || "",
+                        year: defS.year || existing.year || ""
+                    };
+                } else {
+                    studentObj = { ...defS };
+                }
+                
+                if (!idsSeen.has(studentObj.id)) {
+                    idsSeen.add(studentObj.id);
+                    updatedStudents.push(studentObj);
+                }
+            });
+            
+            // 保留雲端中剩餘的不在預設列表中的學生
+            state.students.forEach(s => {
+                if (!idsSeen.has(s.id)) {
+                    idsSeen.add(s.id);
+                    updatedStudents.push(s);
+                }
+            });
+            
+            // 更新本地狀態
+            state.students = updatedStudents;
+            
+            const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
+            let batch = writeBatch(state.firebaseDb);
+            let count = 0;
+            for (const student of updatedStudents) {
+                const docRef = doc(state.firebaseDb, "students", student.id);
+                batch.set(docRef, student, { merge: true });
+                count++;
+                if (count % 400 === 0) {
+                    await batch.commit();
+                    batch = writeBatch(state.firebaseDb);
+                }
+            }
+            if (count % 400 !== 0) {
+                await batch.commit();
+            }
+            
+            localStorage.setItem('student_emails_migrated_v132_firestore', 'done');
+            console.log(`✅ 雲端對接成功！已完成雲端 ${updatedStudents.length} 筆學籍與座號同步。`);
+        } catch (e) {
+            console.error("❌ 雲端 Google 帳號與學籍對接失敗:", e);
+        }
+    }
+}
+
 function renderGuidanceDisciplineDashboard() {
     // 獲取符合篩選的學生
     const filteredStudents = state.students.filter(s => {
@@ -4490,87 +4571,6 @@ async function cleanObsoleteDummyStudents() {
             console.error("雲端 Firestore 數據同步淨化失敗:", e);
         }
     }
-}
-
-async function migrateStudentEmailsAndRosterFirestore() {
-    if (state.isFirebase && state.firebaseDb && localStorage.getItem('student_emails_migrated_v131_firestore') !== 'done') {
-        try {
-            console.log("🚀 正在啟動 Firestore 雲端 Google 帳號與學籍座號同步對接程序...");
-            
-            const existingByNum = new Map();
-            const existingByName = new Map();
-            const existingById = new Map();
-            
-            state.students.forEach(s => {
-                if (s.studentNum) existingByNum.set(s.studentNum.toLowerCase().trim(), s);
-                if (s.name) existingByName.set(s.name.trim(), s);
-                if (s.id) existingById.set(s.id.trim(), s);
-            });
-            
-            const updatedStudents = [];
-            const idsSeen = new Set();
-            
-            (window.DEFAULT_STUDENTS || []).forEach(defS => {
-                const sNumKey = defS.studentNum ? defS.studentNum.toLowerCase().trim() : "";
-                const existing = existingByNum.get(sNumKey) || existingByName.get(defS.name.trim()) || existingById.get(defS.id.trim());
-                
-                let studentObj;
-                if (existing) {
-                    studentObj = {
-                        ...existing,
-                        id: existing.id || defS.id,
-                        email: defS.email,
-                        studentNum: defS.studentNum,
-                        nameEn: defS.nameEn || existing.nameEn || "",
-                        barcode: defS.barcode || existing.barcode || "",
-                        number: defS.number || existing.number || ""
-                    };
-                } else {
-                    studentObj = { ...defS };
-                }
-                
-                if (!idsSeen.has(studentObj.id)) {
-                    idsSeen.add(studentObj.id);
-                    updatedStudents.push(studentObj);
-                }
-            });
-            
-            // 保留雲端中剩餘的不在預設列表中的學生
-            state.students.forEach(s => {
-                if (!idsSeen.has(s.id)) {
-                    idsSeen.add(s.id);
-                    updatedStudents.push(s);
-                }
-            });
-            
-            // 更新狀態機
-            state.students = updatedStudents;
-            
-            // 寫入雲端 Firestore
-            const { doc, writeBatch } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
-            let batch = writeBatch(state.firebaseDb);
-            let count = 0;
-            for (const student of updatedStudents) {
-                const docRef = doc(state.firebaseDb, "students", student.id);
-                batch.set(docRef, student, { merge: true });
-                count++;
-                if (count % 400 === 0) {
-                    await batch.commit();
-                    batch = writeBatch(state.firebaseDb);
-                }
-            }
-            if (count % 400 !== 0) {
-                await batch.commit();
-            }
-            
-            localStorage.setItem('student_emails_migrated_v131_firestore', 'done');
-            console.log(`✅ 雲端對接成功！已完成雲端 ${updatedStudents.length} 筆學籍與座號同步。`);
-        } catch (e) {
-            console.error("❌ 雲端 Google 帳號與學籍對接失敗:", e);
-        }
-    }
-}
-
 async function initApp() {
     // 1. 引導數據層初始化
     await DB.init();
@@ -4579,9 +4579,9 @@ async function initApp() {
     await cleanObsoleteDummyStudents();
 
     // 1.3. 靜默執行 Google 電子郵箱與實際學籍一鍵對接 (Google accounts auto-migration & synchronization)
-    if (localStorage.getItem('student_emails_migrated_v131') !== 'done') {
+    if (localStorage.getItem('student_emails_migrated_v132') !== 'done') {
         try {
-            console.log("🚀 正在啟動 Google 帳號與學籍關聯數據同步對接程序...");
+            console.log("🚀 正在啟動 Google 帳號與學籍關聯數據同步對接程序 (v132)...");
             
             const existingByNum = new Map();
             const existingByName = new Map();
@@ -4605,11 +4605,14 @@ async function initApp() {
                     studentObj = {
                         ...existing,
                         id: existing.id || defS.id,
+                        name: defS.name,
+                        nameEn: defS.nameEn || existing.nameEn || "",
+                        class: defS.class,
+                        number: defS.number,
                         email: defS.email,
                         studentNum: defS.studentNum,
-                        nameEn: defS.nameEn || existing.nameEn || "",
                         barcode: defS.barcode || existing.barcode || "",
-                        number: defS.number || existing.number || ""
+                        year: defS.year || existing.year || ""
                     };
                 } else {
                     studentObj = { ...defS };
@@ -4653,7 +4656,7 @@ async function initApp() {
                 localStorage.setItem('student_points_db_students', JSON.stringify(state.students));
             }
             
-            localStorage.setItem('student_emails_migrated_v131', 'done');
+            localStorage.setItem('student_emails_migrated_v132', 'done');
             console.log(`✅ 成功關聯學籍！共完成 ${updatedStudents.length} 筆學生的 Google 帳箱關聯與同步對接。`);
         } catch (e) {
             console.error("❌ Google 帳號與學籍關聯對接時發生錯誤:", e);
