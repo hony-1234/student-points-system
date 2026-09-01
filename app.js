@@ -3930,6 +3930,16 @@ function renderInteractiveSimulatorList(query = '') {
 // 開發者數據庫同步：Google Firebase Firestore 連接設定
 // =========================================================================
 function openFirebaseConfigModal() {
+    if (state.userRole !== 'teacher') {
+        const pin = prompt("🔐 這是受保護的系統設定區域。\n\n請輸入教師管理密碼以開啟 Google Firebase 雲端配置參數：");
+        if (pin !== "510971") {
+            if (pin !== null) {
+                showToast("驗證失敗，密碼錯誤！", "error");
+            }
+            return;
+        }
+    }
+
     const overlay = document.getElementById('firebase-config-modal');
     const apiKey = document.getElementById('fb-api-key');
     const authDom = document.getElementById('fb-auth-domain');
