@@ -864,13 +864,15 @@ function switchTab(tabId) {
             if (importBtn) importBtn.style.display = 'none';
             if (templateBtn) templateBtn.style.display = 'none';
 
-            // 隱藏「全校歷史交易日誌」與「風紀報到考勤日誌」子分頁
+            // 隱藏「全校歷史交易日誌」、「風紀報到考勤日誌」與「學生帳號對照表」子分頁
             const transactionsTabBtn = document.querySelector('.report-tab-btn[data-report-tab="transactions"]');
             if (transactionsTabBtn) transactionsTabBtn.style.display = 'none';
             const prefectTabBtn = document.querySelector('.report-tab-btn[data-report-tab="prefect-duty-log"]');
             if (prefectTabBtn) prefectTabBtn.style.display = 'none';
+            const accountsTabBtn = document.querySelector('.report-tab-btn[data-report-tab="student-accounts-lookup"]');
+            if (accountsTabBtn) accountsTabBtn.style.display = 'none';
 
-            if (state.activeReportTab === 'transactions' || state.activeReportTab === 'prefect-duty-log') {
+            if (state.activeReportTab === 'transactions' || state.activeReportTab === 'prefect-duty-log' || state.activeReportTab === 'student-accounts-lookup') {
                 state.activeReportTab = 'by-students';
                 document.querySelectorAll('.report-tab-btn').forEach(btn => {
                     btn.classList.remove('active');
@@ -895,11 +897,13 @@ function switchTab(tabId) {
             if (importBtn) importBtn.style.display = '';
             if (templateBtn) templateBtn.style.display = '';
 
-            // 顯示「全校歷史交易日誌」與「風紀報到考勤日誌」子分頁
+            // 顯示「全校歷史交易日誌」、「風紀報到考勤日誌」與「學生帳號對照表」子分頁
             const transactionsTabBtn = document.querySelector('.report-tab-btn[data-report-tab="transactions"]');
             if (transactionsTabBtn) transactionsTabBtn.style.display = '';
             const prefectTabBtn = document.querySelector('.report-tab-btn[data-report-tab="prefect-duty-log"]');
             if (prefectTabBtn) prefectTabBtn.style.display = '';
+            const accountsTabBtn = document.querySelector('.report-tab-btn[data-report-tab="student-accounts-lookup"]');
+            if (accountsTabBtn) accountsTabBtn.style.display = '';
         }
     }
 
@@ -3536,6 +3540,64 @@ function renderReportSubTable() {
             document.getElementById('prefect-schedule-file-input').click();
         });
         document.getElementById('prefect-schedule-file-input').addEventListener('change', handleImportPrefectSchedule);
+    } else if (state.activeReportTab === 'student-accounts-lookup') {
+        const filteredStudents = state.students.filter(s => {
+            const matchesSearch = 
+                s.name.toLowerCase().includes(query) || 
+                (s.nameEn && s.nameEn.toLowerCase().includes(query)) ||
+                (s.studentNum && s.studentNum.toLowerCase().includes(query)) ||
+                (s.email && s.email.toLowerCase().includes(query)) ||
+                s.id.includes(query);
+            const matchesClass = !classF || s.class === classF;
+            const matchesYear = !yearF || s.year === yearF;
+            return matchesSearch && matchesClass && matchesYear;
+        });
+
+        // 按班級與座號升序排列
+        filteredStudents.sort((a, b) => {
+            const classCompare = a.class.localeCompare(b.class, undefined, { numeric: true, sensitivity: 'base' });
+            if (classCompare !== 0) return classCompare;
+            const numA = parseInt(a.number) || 0;
+            const numB = parseInt(b.number) || 0;
+            return numA - numB;
+        });
+
+        container.innerHTML = `
+            <div style="margin-bottom: 16px; padding: 14px; background: rgba(59, 130, 246, 0.04); border: 1.5px dashed rgba(59, 130, 246, 0.15); border-radius: 12px; font-size: 13px; color: #4b5563; line-height: 1.6;">
+                💡 <strong>🔑 學生帳號與登入資訊對照表</strong>：此頁面專供教師進行雙重核對 (Double Check)。您可以透過上方搜尋欄快速模糊檢索學生的「中文姓名、英文姓名、學生編號 (s號碼)、卡片 ID (RFID) 或 Google 電郵」來確認學生的對接設定狀態。
+            </div>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>班別</th>
+                            <th>座號</th>
+                            <th>學生姓名</th>
+                            <th>英文姓名</th>
+                            <th>學生編號 (s號碼)</th>
+                            <th>Google 學生電郵</th>
+                            <th>智能卡 ID (RFID)</th>
+                            <th>條碼編號 (Barcode)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${filteredStudents.map(s => `
+                            <tr>
+                                <td style="font-weight: 700; color: var(--secondary);">${s.class} 班</td>
+                                <td style="font-weight: 600;">${s.number ? s.number + ' 號' : '--'}</td>
+                                <td style="font-weight: 700; color: var(--text-color);">${s.name}</td>
+                                <td style="font-size: 12px; color: var(--text-muted); font-family: monospace;">${s.nameEn || '--'}</td>
+                                <td style="font-weight: 600; font-family: monospace; color: #3b82f6;">${s.studentNum || '--'}</td>
+                                <td style="font-size: 13px; color: #10b981; font-weight: 600; font-family: monospace;">${s.email || '--'}</td>
+                                <td style="font-family: monospace; color: var(--text-muted); font-size: 12px;">${s.id}</td>
+                                <td style="font-family: monospace; color: var(--text-dim); font-size: 12px;">${s.barcode || '--'}</td>
+                            </tr>
+                        `).join('')}
+                        ${filteredStudents.length === 0 ? `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding: 24px 0;">未找到與當前篩選條件相匹配的學生數據。</td></tr>` : ''}
+                    </tbody>
+                </table>
+            </div>
+        `;
     }
 }
 
