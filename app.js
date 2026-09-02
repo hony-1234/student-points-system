@@ -54,6 +54,10 @@ const state = {
     scannedStudent: null, // 教師發放積分卡
     kioskStudent: null,   // 學生查詢卡
     selectedRedeemGift: null, // 超市選取禮物卡
+    shopMode: 'self-service', // 'self-service' or 'checkout'
+    checkoutPrice: 0,        // 收銀扣點設定金額
+    checkoutStatus: 'idle',  // 'idle', 'waiting', 'success', 'error'
+    checkoutResultStudent: null, // 收銀扣點成功之學生資訊
     isFirebase: false,
     firebaseDb: null,
     firebaseAuth: null,
@@ -605,6 +609,100 @@ const DB = {
         };
         await this.addTransaction(tx);
         return { student, gift };
+    },
+
+    async deductPoints(studentId, points, reason) {
+        const student = state.students.find(s => s.id === studentId);
+        if (!student) throw new Error("找不到此學生");
+        if (student.points < points) throw new Error("學生點數餘額不足");
+        
+        student.points -= points;
+        student.redeemed += points;
+        await this.saveStudent(student);
+        
+        const tx = {
+            id: "tx-" + Date.now() + Math.floor(Math.random() * 100),
+            studentId: student.id,
+            studentName: student.name,
+            studentNum: student.studentNum || "",
+            studentClass: student.class || "",
+            type: "redeem",
+            target: reason || "超市收銀扣點購買",
+            points: -points,
+            timestamp: new Date().toISOString()
+        };
+        await this.addTransaction(tx);
+        return student;
+    },
+
+    async processDailyInterest() {
+        const todayStr = getLocalDateString();
+        let changed = false;
+        
+        for (const student of state.students) {
+            if (!student.interestLastCredited) {
+                student.interestLastCredited = todayStr;
+                await this.saveStudent(student);
+                changed = true;
+                continue;
+            }
+            
+            if (student.interestLastCredited < todayStr) {
+                let tempPoints = student.points;
+                let studentChanged = false;
+                
+                let currentDateCursor = new Date(student.interestLastCredited + "T00:00:00");
+                while (getLocalDateString(currentDateCursor) < todayStr) {
+                    currentDateCursor.setDate(currentDateCursor.getDate() + 1);
+                    const dayStr = getLocalDateString(currentDateCursor);
+                    
+                    const txId = `tx-interest-${student.id}-${dayStr}`;
+                    const txExists = state.transactions.some(t => t.id === txId);
+                    
+                    if (!txExists) {
+                        const interest = Math.round(tempPoints * 0.01);
+                        if (interest > 0) {
+                            tempPoints += interest;
+                            
+                            const tx = {
+                                id: txId,
+                                studentId: student.id,
+                                studentName: student.name,
+                                studentNum: student.studentNum || "",
+                                studentClass: student.class || "",
+                                type: "interest",
+                                target: "每日 1% 複利息",
+                                points: interest,
+                                timestamp: dayStr + "T12:00:00Z"
+                            };
+                            
+                            state.transactions.push(tx);
+                            if (state.isFirebase && state.firebaseDb) {
+                                const { doc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
+                                await setDoc(doc(state.firebaseDb, "transactions", tx.id), tx);
+                            }
+                        }
+                        
+                        student.points = tempPoints;
+                        student.interestLastCredited = dayStr;
+                        studentChanged = true;
+                    } else {
+                        student.interestLastCredited = dayStr;
+                        studentChanged = true;
+                    }
+                }
+                
+                if (studentChanged) {
+                    await this.saveStudent(student);
+                    changed = true;
+                }
+            }
+        }
+        
+        if (changed && !state.isFirebase) {
+            localStorage.setItem('student_points_db_students', JSON.stringify(state.students));
+            localStorage.setItem('student_points_db_transactions', JSON.stringify(state.transactions));
+        }
     }
 };
 
@@ -750,15 +848,20 @@ const CardReader = {
             showToast(`歡迎回來，${student.name}！`, "success");
             triggerConfettiSmall();
         } else if (state.activeTab === 'student-shop') {
-            logConsole(`刷卡: 學生 [${student.name}] 嘗試進行超市自助自動兌換`, "info");
-            
-            if (!state.selectedRedeemGift) {
-                showToast("【自動兌換失敗】請先點擊選取心儀寶物 🎁！", "warning");
-                logConsole(`警告: 學生 [${student.name}] 刷卡，但未事先在貨架上點選禮品。`, "warning");
-                return;
-            }
+            if (state.shopMode === 'checkout') {
+                logConsole(`收銀刷卡: 學生 [${student.name}] 已於超市感應讀卡`, "info");
+                executeCheckoutDeduction(student);
+            } else {
+                logConsole(`刷卡: 學生 [${student.name}] 嘗試進行超市自助自動兌換`, "info");
+                
+                if (!state.selectedRedeemGift) {
+                    showToast("【自動兌換失敗】請先點擊選取心儀寶物 🎁！", "warning");
+                    logConsole(`警告: 學生 [${student.name}] 刷卡，但未事先在貨架上點選禮品。`, "warning");
+                    return;
+                }
 
-            executeGiftRedemption(student, state.selectedRedeemGift);
+                executeGiftRedemption(student, state.selectedRedeemGift);
+            }
         } else if (state.activeTab === 'guidance-discipline') {
             logConsole(`刷卡: 學生 [${student.name}] 已感應讀卡 [${cardId}]`, "info");
             
@@ -955,8 +1058,14 @@ function switchTab(tabId) {
 }
 
 // =========================================================================
-// 交互反饋、通知與特效
+// 交互反饋、通知與特效 & 計利息日期輔助函數
 // =========================================================================
+function getLocalDateString(date = new Date()) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
@@ -1269,6 +1378,17 @@ function formatHistoryDate(isoString) {
         const h = String(d.getHours()).padStart(2, '0');
         const min = String(d.getMinutes()).padStart(2, '0');
         return `${m}/${date} ${h}:${min}`;
+    } catch(e) {
+        return "";
+    }
+}
+function formatHistoryDateShort(isoString) {
+    try {
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return "";
+        const m = d.getMonth() + 1;
+        const date = d.getDate();
+        return `${m}/${date}`;
     } catch(e) {
         return "";
     }
@@ -1747,6 +1867,13 @@ function renderStudentProfileKiosk() {
 
     // 計算多維度累積積分 (使用超強魯棒防禦性代碼，抵禦空數據或損壞數據)
     const earnedTx = (state.transactions || []).filter(t => t && t.studentId === s.id && t.type === 'earn');
+    
+    // 過濾出該學生的所有複利息交易，並按時間升序排列
+    const interestTx = (state.transactions || [])
+        .filter(t => t && t.studentId === s.id && t.type === 'interest')
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    const totalInterestEarned = interestTx.reduce((sum, t) => sum + (parseFloat(t.points) || 0), 0);
     const academicPts = earnedTx.filter(t => t && t.target === "學業").reduce((sum, t) => sum + (parseFloat(t.points) || 0), 0);
     const bookPts = earnedTx.filter(t => t && t.target === "圖書").reduce((sum, t) => sum + (parseFloat(t.points) || 0), 0);
     const moralityPts = earnedTx.filter(t => t && t.target === "宗德").reduce((sum, t) => sum + (parseFloat(t.points) || 0), 0);
@@ -1911,6 +2038,100 @@ function renderStudentProfileKiosk() {
                     </div>
                 </div>
 
+                <!-- 每日 1% 複利息增長圖表 -->
+                <div class="glass-card" style="padding: 24px; border: 1.5px solid rgba(245, 158, 11, 0.2); background: rgba(255, 255, 255, 0.95); box-shadow: 0 4px 20px rgba(245, 158, 11, 0.05); display: flex; flex-direction: column; gap: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(245, 158, 11, 0.12); padding-bottom: 14px; margin-bottom: 6px;">
+                        <h3 style="font-size: 17px; font-weight: 800; color: #b45309; display: flex; align-items: center; gap: 10px; margin: 0;">
+                            <span style="font-size: 18px;">💰</span> 每日 1% 複利息回報
+                        </h3>
+                        <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 20px; padding: 4px 12px; font-size: 12.5px; font-weight: 800; color: #b45309; display: flex; align-items: center; gap: 4px;">
+                            累積已賺取: <strong style="color: #d97706;">+${totalInterestEarned} ⭐</strong>
+                        </div>
+                    </div>
+                    
+                    ${(() => {
+                        if (interestTx.length === 0) {
+                            return `
+                                <div style="text-align: center; padding: 24px 16px; background: rgba(245, 158, 11, 0.02); border-radius: 12px; border: 1.5px dashed rgba(245, 158, 11, 0.15); display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                                    <div style="font-size: 36px; animation: float 3s ease-in-out infinite;">🌱</div>
+                                    <h4 style="font-size: 14.5px; font-weight: 800; color: #b45309; margin: 0;">複利息孵化中...</h4>
+                                    <p style="font-size: 12px; color: #78350f; line-height: 1.6; max-width: 320px; margin: 0; font-weight: 600;">
+                                        系統每天將自動為您的可用積點餘額（當前 <strong>${s.points} ⭐</strong>）發放 **1%** 的每日複利回報！<br>
+                                        <span style="color: #d97706;">💰 存得越多、不急著兌換，利息滾動得越快哦！</span>
+                                    </p>
+                                </div>
+                            `;
+                        } else {
+                            // 取最近的最多 7 筆計息紀錄
+                            const plotData = interestTx.slice(-7);
+                            const svgW = 420;
+                            const svgH = 140;
+                            const padL = 35;
+                            const padR = 20;
+                            const padT = 20;
+                            const padB = 25;
+
+                            const maxVal = Math.max(...plotData.map(t => t.points), 3);
+                            const minVal = 0;
+                            const valRange = maxVal - minVal;
+
+                            const pointsCoords = [];
+                            const xStep = (svgW - padL - padR) / Math.max(plotData.length - 1, 1);
+
+                            plotData.forEach((t, index) => {
+                                const x = padL + index * xStep;
+                                const y = svgH - padB - ((t.points - minVal) / valRange) * (svgH - padT - padB);
+                                pointsCoords.push({ x, y, val: t.points, date: formatHistoryDateShort(t.timestamp) });
+                            });
+
+                            let pathD = '';
+                            let areaD = '';
+                            if (pointsCoords.length > 0) {
+                                pathD = `M ${pointsCoords[0].x} ${pointsCoords[0].y}`;
+                                areaD = `M ${pointsCoords[0].x} ${svgH - padB} L ${pointsCoords[0].x} ${pointsCoords[0].y}`;
+                                for (let i = 1; i < pointsCoords.length; i++) {
+                                    pathD += ` L ${pointsCoords[i].x} ${pointsCoords[i].y}`;
+                                    areaD += ` L ${pointsCoords[i].x} ${pointsCoords[i].y}`;
+                                }
+                                areaD += ` L ${pointsCoords[pointsCoords.length - 1].x} ${svgH - padB} Z`;
+                            }
+
+                            const gridLines = [];
+                            const gridSteps = 3;
+                            for (let i = 0; i <= gridSteps; i++) {
+                                const val = Math.round(minVal + (valRange / gridSteps) * i);
+                                const y = svgH - padB - (i / gridSteps) * (svgH - padT - padB);
+                                gridLines.push(`
+                                    <line x1="${padL}" y1="${y}" x2="${svgW - padR}" y2="${y}" stroke="rgba(245, 158, 11, 0.08)" stroke-width="1" />
+                                    <text x="${padL - 8}" y="${y + 4}" fill="#d97706" font-size="10" font-weight="700" text-anchor="end">${val}⭐</text>
+                                `);
+                            }
+
+                            return `
+                                <div style="position: relative;">
+                                    <svg viewBox="0 0 ${svgW} ${svgH}" style="width: 100%; height: auto; overflow: visible;">
+                                        <defs>
+                                            <linearGradient id="interest-grad" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.25" />
+                                                <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.0" />
+                                            </linearGradient>
+                                        </defs>
+                                        ${gridLines.join('')}
+                                        ${areaD ? `<path d="${areaD}" fill="url(#interest-grad)" />` : ''}
+                                        ${pathD ? `<path d="${pathD}" fill="none" stroke="#d97706" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />` : ''}
+                                        ${pointsCoords.map(pt => `
+                                            <circle cx="${pt.x}" cy="${pt.y}" r="4.5" fill="#f59e0b" stroke="#fff" stroke-width="1.5" />
+                                            <text x="${pt.x}" y="${pt.y - 8}" fill="#b45309" font-size="9" font-weight="800" text-anchor="middle">+${pt.val}</text>
+                                            <text x="${pt.x}" y="${svgH - 8}" fill="#92400e" font-size="9" font-weight="700" text-anchor="middle">${pt.date}</text>
+                                        `).join('')}
+                                        <line x1="${padL}" y1="${svgH - padB}" x2="${svgW - padR}" y2="${svgH - padB}" stroke="rgba(245, 158, 11, 0.15)" stroke-width="1.5" />
+                                    </svg>
+                                </div>
+                            `;
+                        }
+                    })()}
+                </div>
+
                 <!-- 校長勉勵語 -->
                 <div class="glass-card" style="padding: 20px; border: 2.5px solid rgba(245, 158, 11, 0.25); background: linear-gradient(135deg, rgba(254, 243, 199, 0.8), #fff); box-shadow: 0 4px 20px rgba(245, 158, 11, 0.08); position: relative; border-radius: 16px;">
                     <div style="font-size: 32px; position: absolute; top: -14px; left: 16px; background: #fff; border-radius: 50%; padding: 4px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(0,0,0,0.08);">💌</div>
@@ -1946,14 +2167,45 @@ function renderStudentProfileKiosk() {
     });
 }
 
-// 🛍️ 頁面二：全自動自助超市（免確認、先選定、後感應）
+// 🛍️ 頁面二：全自動自助超市（包含學生自主兌換貨架 & 協理生收銀手動扣點模式）
 function renderAutomatedShopKiosk() {
     const bodyContainer = document.getElementById('kiosk-display-body');
     if (!bodyContainer) return;
 
+    // A. 頂部模式切換器 HTML
+    const modeSelectorHtml = `
+        <div class="shop-mode-selector" style="display: flex; background: rgba(15, 23, 42, 0.05); padding: 5px; border-radius: 14px; margin-bottom: 24px; width: fit-content; border: 1.5px solid rgba(15, 23, 42, 0.03); box-shadow: inset 0 2px 4px rgba(0,0,0,0.02); animation: fadeIn 0.3s ease-out;">
+            <button class="shop-mode-btn" data-mode="self-service" style="padding: 10px 22px; border-radius: 10px; font-weight: 800; font-size: 14px; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.25s; background: ${state.shopMode === 'self-service' ? 'linear-gradient(135deg, #a855f7, #8b5cf6)' : 'transparent'}; color: ${state.shopMode === 'self-service' ? 'white' : 'var(--text-muted)'}; box-shadow: ${state.shopMode === 'self-service' ? '0 4px 14px rgba(139, 92, 246, 0.25)' : 'none'};">
+                <i class="fas fa-shopping-basket"></i> 🛍️ 學生自助兌換超市
+            </button>
+            <button class="shop-mode-btn" data-mode="checkout" style="padding: 10px 22px; border-radius: 10px; font-weight: 800; font-size: 14px; border: none; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: all 0.25s; background: ${state.shopMode === 'checkout' ? 'linear-gradient(135deg, #06b6d4, #0891b2)' : 'transparent'}; color: ${state.shopMode === 'checkout' ? 'white' : 'var(--text-muted)'}; box-shadow: ${state.shopMode === 'checkout' ? '0 4px 14px rgba(6, 182, 212, 0.25)' : 'none'};">
+                <i class="fas fa-cash-register"></i> 📟 協理生快速收銀扣點
+            </button>
+        </div>
+    `;
+
+    // 如果當前是收銀手動扣點模式，轉向專屬面板渲染
+    if (state.shopMode === 'checkout') {
+        renderCheckoutKioskPanel(bodyContainer, modeSelectorHtml);
+        
+        // 綁定模式切換按鈕事件
+        bodyContainer.querySelectorAll('.shop-mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.shopMode = btn.dataset.mode;
+                if (state.shopMode === 'checkout') {
+                    state.checkoutPrice = 0;
+                    state.checkoutStatus = 'idle';
+                    state.checkoutResultStudent = null;
+                }
+                renderAutomatedShopKiosk();
+            });
+        });
+        return;
+    }
+
     const g = state.selectedRedeemGift;
 
-    bodyContainer.innerHTML = `
+    bodyContainer.innerHTML = modeSelectorHtml + `
         <!-- 超市頂部步驟常駐引導欄 -->
         <div class="kiosk-student-bar" style="background: ${g ? 'linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.02))' : 'rgba(255, 255, 255, 0.95)'}; border: 1.5px solid ${g ? '#10b981' : 'rgba(168, 85, 247, 0.18)'}; box-shadow: 0 8px 32px rgba(168, 85, 247, 0.06); margin-bottom: 24px; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; gap: 20px; border-radius: 16px;">
             <div style="display: flex; align-items: center; gap: 16px;">
@@ -2030,6 +2282,19 @@ function renderAutomatedShopKiosk() {
         </div>
     `;
 
+    // 綁定模式切換按鈕事件
+    bodyContainer.querySelectorAll('.shop-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.shopMode = btn.dataset.mode;
+            if (state.shopMode === 'checkout') {
+                state.checkoutPrice = 0;
+                state.checkoutStatus = 'idle';
+                state.checkoutResultStudent = null;
+            }
+            renderAutomatedShopKiosk();
+        });
+    });
+
     // 綁定清除按鈕事件
     const clearBtn = document.getElementById('shop-clear-selection-btn');
     if (clearBtn) {
@@ -2055,6 +2320,275 @@ function renderAutomatedShopKiosk() {
 
     renderAutomatedGiftsGrid();
     initShopSuccessModalEvents();
+}
+
+// 📟 協理生收銀手動快速扣點主面板渲染
+function renderCheckoutKioskPanel(container, modeSelectorHtml) {
+    const price = state.checkoutPrice || 0;
+    const status = state.checkoutStatus || 'idle';
+    const resultStudent = state.checkoutResultStudent;
+
+    container.innerHTML = modeSelectorHtml + `
+        <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px; animation: fadeIn 0.4s ease-out;">
+            <!-- 左邊欄：收銀設定 -->
+            <div class="glass-card" style="padding: 24px; border-radius: 20px; border: 1.5px solid rgba(139, 92, 246, 0.15); display: flex; flex-direction: column; gap: 20px; background: rgba(255, 255, 255, 0.95); box-shadow: 0 10px 30px rgba(0,0,0,0.04);">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="width: 36px; height: 36px; border-radius: 50%; background: rgba(6, 182, 212, 0.1); display: flex; align-items: center; justify-content: center; color: #0891b2; font-size: 16px;">
+                        <i class="fas fa-calculator"></i>
+                    </div>
+                    <div>
+                        <h3 style="font-size: 16px; font-weight: 800; color: #1e1b4b; margin: 0;">第一步：收銀定價設定</h3>
+                        <p style="font-size: 12px; color: var(--text-muted); margin: 2px 0 0 0;">請協理生輸入商品價格，點數將自學生帳號扣除</p>
+                    </div>
+                </div>
+
+                <!-- 定價輸入框 -->
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <label style="font-size: 13px; font-weight: 700; color: #475569;">💰 商品價格（積點 ⭐）</label>
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <span style="position: absolute; left: 16px; font-size: 20px; color: #06b6d4; font-weight: 800;">⭐</span>
+                        <input type="number" id="checkout-price-input" value="${price || ''}" placeholder="請輸入價格..." min="1" step="1" style="width: 100%; padding: 12px 16px 12px 48px; border-radius: 12px; border: 2.5px solid #06b6d4; font-size: 20px; font-weight: 800; color: #0f172a; outline: none; transition: border-color 0.2s;" />
+                    </div>
+                </div>
+
+                <!-- 快速預設定價 -->
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <label style="font-size: 12px; font-weight: 700; color: #475569; display: flex; justify-content: space-between;">
+                        <span>⚡ 快速預設定價</span>
+                        <span style="font-size: 11px; color: #0891b2; cursor: pointer;" id="checkout-clear-price-btn"><i class="fas fa-trash-alt"></i> 清除</span>
+                    </label>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                        ${[5, 10, 15, 20, 30, 50].map(p => `
+                            <button class="btn-style secondary checkout-preset-btn" data-val="${p}" style="border: 2px solid ${price === p ? '#06b6d4' : 'rgba(6,182,212,0.12)'}; background: ${price === p ? 'rgba(6,182,212,0.08)' : 'rgba(255,255,255,0.6)'}; color: ${price === p ? '#0891b2' : '#0f172a'}; font-weight: 800; font-size: 14px; padding: 10px; border-radius: 10px; cursor: pointer; transition: all 0.2s;">
+                                ${p} ⭐
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+
+                <!-- 商品名稱 / 備註 -->
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <label style="font-size: 13px; font-weight: 700; color: #475569;">📝 交易商品說明（選填）</label>
+                    <input type="text" id="checkout-reason-input" placeholder="例如：神奇文具、幸運禮包、自訂購買..." value="${state.checkoutReason || ''}" style="width: 100%; padding: 10px 14px; border-radius: 10px; border: 1.5px solid #cbd5e1; font-size: 13.5px; outline: none;" />
+                </div>
+            </div>
+
+            <!-- 右邊欄：嗶卡狀態與顯示 -->
+            <div class="glass-card" style="padding: 24px; border-radius: 20px; border: 1.5px solid rgba(139, 92, 246, 0.15); display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 380px; background: rgba(255, 255, 255, 0.95); box-shadow: 0 10px 30px rgba(0,0,0,0.04); text-align: center; position: relative;">
+                ${status === 'idle' ? `
+                    <!-- 閒置狀態 -->
+                    <div style="animation: scaleIn 0.3s ease-out; display: flex; flex-direction: column; align-items: center; gap: 16px;">
+                        <div style="font-size: 56px;">📟</div>
+                        <h3 style="font-size: 18px; font-weight: 800; color: #1e1b4b; margin: 0;">等待協理生設定價格...</h3>
+                        <p style="font-size: 13px; color: var(--text-muted); max-width: 280px; line-height: 1.6; margin: 0;">
+                            請在左側輸入或選擇交易金額。定價大於 0 時將會自動激活嗶卡感應通道。
+                        </p>
+                    </div>
+                ` : status === 'waiting' ? `
+                    <!-- 等待嗶卡狀態 -->
+                    <div style="animation: scaleIn 0.3s ease-out; display: flex; flex-direction: column; align-items: center; gap: 20px; width: 100%;">
+                        <div style="background: rgba(6,182,212,0.05); border: 2.5px dashed #06b6d4; border-radius: 16px; padding: 14px 24px; width: 85%;">
+                            <span style="font-size: 13px; color: #0891b2; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">當前扣點售價</span>
+                            <h2 style="font-size: 40px; font-weight: 900; color: #0891b2; margin: 4px 0 0 0;">⭐ ${price} 點</h2>
+                        </div>
+                        
+                        <!-- 閃耀聲納雷達 -->
+                        <div class="scan-area-container" style="padding: 0; background: transparent; border: none; flex-direction: column; gap: 14px; margin: 10px 0;">
+                            <div class="scan-radar" style="width: 80px; height: 80px;">
+                                <div class="radar-circle" style="border-color: #06b6d4; border-width: 3px;"></div>
+                                <div class="radar-circle" style="border-color: #06b6d4; border-width: 3px;"></div>
+                                <div class="radar-circle" style="border-color: #06b6d4; border-width: 3px;"></div>
+                                <div class="radar-core" style="background: linear-gradient(135deg, #06b6d4, #0891b2); color: #fff; font-size: 24px;">
+                                    <i class="fas fa-rss" style="animation: float 2s ease-in-out infinite;"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 style="font-size: 18px; font-weight: 800; color: #0891b2; animation: pulse 1.5s infinite; margin: 0 0 4px 0;">🔔 扣點通道已激活！</h3>
+                            <p style="font-size: 13.5px; color: #475569; font-weight: 600; margin: 0;">請學生同學<strong>「嗶卡感應」</strong>完成扣點交易</p>
+                        </div>
+                    </div>
+                ` : status === 'success' && resultStudent ? `
+                    <!-- 扣點成功狀態 -->
+                    <div style="animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%;">
+                        <div style="width: 64px; height: 64px; border-radius: 50%; background: rgba(16,185,129,0.1); border: 3px solid #10b981; display: flex; align-items: center; justify-content: center; font-size: 28px; color: #10b981; box-shadow: 0 4px 15px rgba(16,185,129,0.2);">
+                            <i class="fas fa-check"></i>
+                        </div>
+                        
+                        <div>
+                            <h3 style="font-size: 20px; font-weight: 800; color: #10b981; margin: 0 0 4px 0;">✅ 扣點交易成功！</h3>
+                            <p style="font-size: 13px; color: var(--text-muted); margin: 0;">已完成點數扣減，歡迎再次光臨神奇超市</p>
+                        </div>
+
+                        <div style="background: linear-gradient(135deg, rgba(16,185,129,0.05), rgba(16,185,129,0.01)); border: 1.5px solid rgba(16,185,129,0.15); border-radius: 16px; padding: 16px; width: 90%; display: flex; flex-direction: column; gap: 8px;">
+                            <div style="display: flex; justify-content: space-between; font-size: 13.5px; font-weight: 600; color: #1e1b4b;">
+                                <span>消費學生：</span>
+                                <strong style="color: #4f46e5; font-size: 14.5px;">${resultStudent.class} 班 ${resultStudent.name} (${resultStudent.number || '--'}號)</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13.5px; font-weight: 600; color: #475569; border-top: 1px dashed rgba(0,0,0,0.06); padding-top: 6px;">
+                                <span>商品定價：</span>
+                                <strong style="color: #ef4444;">-${price} 點</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13.5px; font-weight: 600; color: #475569; border-top: 1px dashed rgba(0,0,0,0.06); padding-top: 6px;">
+                                <span>學生賸餘可用點數：</span>
+                                <strong style="color: #10b981; font-size: 15px;">${resultStudent.points} 點</strong>
+                            </div>
+                        </div>
+
+                        <button id="checkout-reset-btn" class="btn-style success" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none; font-weight: 800; font-size: 13px; padding: 10px 24px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(16,185,129,0.25);">
+                            <i class="fas fa-shopping-cart"></i> 繼續下一筆收銀交易
+                        </button>
+                    </div>
+                ` : status === 'error' ? `
+                    <!-- 扣點失敗狀態 -->
+                    <div style="animation: scaleIn 0.3s ease-out; display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%;">
+                        <div style="width: 64px; height: 64px; border-radius: 50%; background: rgba(239,68,68,0.1); border: 3px solid #ef4444; display: flex; align-items: center; justify-content: center; font-size: 28px; color: #ef4444; box-shadow: 0 4px 15px rgba(239,68,68,0.2);">
+                            <i class="fas fa-exclamation-triangle"></i>
+                        </div>
+                        
+                        <div>
+                            <h3 style="font-size: 18px; font-weight: 800; color: #ef4444; margin: 0 0 4px 0;">❌ 扣點失敗：可用餘額不足！</h3>
+                            <p style="font-size: 13px; color: var(--text-muted); margin: 0;">請提醒同學繼續加油積累積分哦 💪</p>
+                        </div>
+
+                        ${state.lastCheckoutAttemptStudent ? `
+                        <div style="background: rgba(239,68,68,0.02); border: 1.5px solid rgba(239,68,68,0.12); border-radius: 14px; padding: 12px; width: 85%; font-size: 13px; font-weight: 600; color: #475569; display: flex; flex-direction: column; gap: 6px;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span>消費同學：</span><span>${state.lastCheckoutAttemptStudent.class} 班 ${state.lastCheckoutAttemptStudent.name}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; border-top: 1px dashed rgba(0,0,0,0.06); padding-top: 4px;">
+                                <span>商品售價：</span><strong style="color: #ef4444;">${price} 點</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; border-top: 1px dashed rgba(0,0,0,0.06); padding-top: 4px;">
+                                <span>實際餘額：</span><strong style="color: #64748b;">${state.lastCheckoutAttemptStudent.points} 點</strong>
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        <button id="checkout-retry-btn" class="btn-style secondary" style="border: 1.5px solid #cbd5e1; font-weight: 800; font-size: 13px; padding: 10px 24px; border-radius: 10px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; background: white;">
+                            <i class="fas fa-redo"></i> 重試 / 重新嗶卡
+                        </button>
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+
+    // 1. 綁定收銀定價輸入框即時修改事件
+    const priceInput = container.querySelector('#checkout-price-input');
+    if (priceInput) {
+        priceInput.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (!isNaN(val) && val > 0) {
+                state.checkoutPrice = Math.floor(val);
+                state.checkoutStatus = 'waiting';
+            } else {
+                state.checkoutPrice = 0;
+                state.checkoutStatus = 'idle';
+            }
+            renderAutomatedShopKiosk();
+            
+            // 重繪後焦點與游標移回
+            const newInput = document.getElementById('checkout-price-input');
+            if (newInput) {
+                newInput.focus();
+                const len = newInput.value.length;
+                newInput.setSelectionRange(len, len);
+            }
+        });
+    }
+
+    // 2. 綁定備註說明輸入事件
+    const reasonInput = container.querySelector('#checkout-reason-input');
+    if (reasonInput) {
+        reasonInput.addEventListener('input', (e) => {
+            state.checkoutReason = e.target.value;
+        });
+    }
+
+    // 3. 綁定快速預設定價點擊事件
+    container.querySelectorAll('.checkout-preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const val = parseInt(btn.dataset.val);
+            state.checkoutPrice = val;
+            state.checkoutStatus = 'waiting';
+            renderAutomatedShopKiosk();
+        });
+    });
+
+    // 4. 綁定清除定價點擊事件
+    const clearPriceBtn = container.querySelector('#checkout-clear-price-btn');
+    if (clearPriceBtn) {
+        clearPriceBtn.addEventListener('click', () => {
+            state.checkoutPrice = 0;
+            state.checkoutStatus = 'idle';
+            state.checkoutResultStudent = null;
+            state.lastCheckoutAttemptStudent = null;
+            renderAutomatedShopKiosk();
+        });
+    }
+
+    // 5. 成功後的重置與重試按鈕綁定
+    const resetBtn = container.querySelector('#checkout-reset-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            state.checkoutPrice = 0;
+            state.checkoutStatus = 'idle';
+            state.checkoutResultStudent = null;
+            state.lastCheckoutAttemptStudent = null;
+            renderAutomatedShopKiosk();
+        });
+    }
+
+    const retryBtn = container.querySelector('#checkout-retry-btn');
+    if (retryBtn) {
+        retryBtn.addEventListener('click', () => {
+            state.checkoutStatus = 'waiting';
+            state.checkoutResultStudent = null;
+            state.lastCheckoutAttemptStudent = null;
+            renderAutomatedShopKiosk();
+        });
+    }
+}
+
+// 📟 收銀模式嗶卡扣點實施邏輯
+async function executeCheckoutDeduction(student) {
+    if (!student) return;
+    const price = state.checkoutPrice;
+    
+    if (isNaN(price) || price <= 0) {
+        showToast("【收銀失敗】定價必須大於 0！", "warning");
+        return;
+    }
+
+    if (student.points < price) {
+        state.checkoutStatus = 'error';
+        state.lastCheckoutAttemptStudent = student;
+        showToast(`❌ 【扣點失敗】學生 [${student.name}] 餘額不足以支付當前交易`, "danger");
+        logConsole(`[收銀交易失敗] 學生 [${student.name}] 可用餘額 (${student.points} 點) 低於商品定價 (${price} 點)。`, "danger");
+        renderAutomatedShopKiosk();
+        return;
+    }
+
+    try {
+        const reason = state.checkoutReason ? state.checkoutReason.trim() : "神奇超市商品交易";
+        const updatedStudent = await DB.deductPoints(student.id, price, reason);
+        
+        state.checkoutStatus = 'success';
+        state.checkoutResultStudent = updatedStudent;
+        
+        // 爆發宇宙煙花
+        triggerConfettiBig();
+        showToast(`✅ 扣點交易成功：-${price} 點！`, "success");
+        logConsole(`[收銀交易成功] 學生 [${updatedStudent.name}] (${updatedStudent.class}班 / ${updatedStudent.number || '--'}號) 購買商品扣除 ${price} 點，賸餘餘額: ${updatedStudent.points} 點。`, "success");
+        renderAutomatedShopKiosk();
+    } catch (e) {
+        console.error(e);
+        showToast("扣點交易處理異常，請重試。", "danger");
+        state.checkoutStatus = 'error';
+        renderAutomatedShopKiosk();
+    }
 }
 
 function renderAutomatedGiftsGrid() {
@@ -4598,6 +5132,13 @@ async function cleanObsoleteDummyStudents() {
 async function initApp() {
     // 1. 引導數據層初始化
     await DB.init();
+    
+    // 1.1. 執行每日 1% 複利計息 (Daily 1% compound interest processor)
+    try {
+        await DB.processDailyInterest();
+    } catch (e) {
+        console.error("每日複利計息處理失敗:", e);
+    }
     
     // 1.2. 靜默執行數據自癒，移除舊有的測試虛擬賬號
     await cleanObsoleteDummyStudents();
