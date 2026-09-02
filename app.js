@@ -5129,6 +5129,7 @@ async function cleanObsoleteDummyStudents() {
             console.error("雲端 Firestore 數據同步淨化失敗:", e);
         }
     }
+}
 async function initApp() {
     // 1. 引導數據層初始化
     await DB.init();
