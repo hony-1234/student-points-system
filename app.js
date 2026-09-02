@@ -698,6 +698,8 @@ const CardReader = {
             if (activeCat) {
                 if (activeCat.id === 'indicators-chip') {
                     categoryReason = activeCat.getAttribute('data-selected-indicator');
+                } else if (activeCat.id === 'languages-chip') {
+                    categoryReason = activeCat.getAttribute('data-selected-language');
                 } else {
                     categoryReason = activeCat.getAttribute('data-val') || activeCat.innerText.trim();
                 }
@@ -1187,6 +1189,8 @@ function updateTeacherAwardStatus() {
     if (activeCat) {
         if (activeCat.id === 'indicators-chip') {
             categoryReason = activeCat.getAttribute('data-selected-indicator');
+        } else if (activeCat.id === 'languages-chip') {
+            categoryReason = activeCat.getAttribute('data-selected-language');
         } else {
             categoryReason = activeCat.getAttribute('data-val') || activeCat.innerText.trim();
         }
@@ -1235,6 +1239,8 @@ function handleTeacherAwardPoints() {
     if (activeCat) {
         if (activeCat.id === 'indicators-chip') {
             categoryReason = activeCat.getAttribute('data-selected-indicator');
+        } else if (activeCat.id === 'languages-chip') {
+            categoryReason = activeCat.getAttribute('data-selected-language');
         } else {
             categoryReason = activeCat.getAttribute('data-val') || activeCat.innerText.trim();
         }
@@ -4786,8 +4792,10 @@ async function initApp() {
         updateTeacherAwardStatus();
     });
 
-    // 教師加分預設分類綁定
+    // 教師加分預設分類綁定 (不包含下拉選單的外殼按鈕)
     document.querySelectorAll('.category-chip').forEach(chip => {
+        if (chip.id === 'indicators-chip' || chip.id === 'languages-chip') return;
+        
         chip.addEventListener('click', () => {
             document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
             chip.classList.add('active');
@@ -4795,34 +4803,50 @@ async function initApp() {
         });
     });
 
-    // 德育 10 大指標下拉子選項點擊與懸停優化綁定
-    const indChip = document.getElementById('indicators-chip');
-    if (indChip) {
-        indChip.addEventListener('click', (e) => {
-            e.stopPropagation(); // 阻止冒泡，防止觸發 document 點擊關閉
-            const wrapper = indChip.closest('.dropdown-wrapper');
-            if (wrapper) {
-                wrapper.classList.toggle('active');
+    // 下拉外殼按鈕點擊：切換自身選單，並關閉其他下拉選單
+    document.querySelectorAll('.dropdown-wrapper .category-chip').forEach(chip => {
+        chip.addEventListener('click', (e) => {
+            e.stopPropagation(); // 阻止冒泡
+            const currentWrapper = chip.closest('.dropdown-wrapper');
+            
+            // 關閉所有其他下拉選單
+            document.querySelectorAll('.dropdown-wrapper').forEach(w => {
+                if (w !== currentWrapper) w.classList.remove('active');
+            });
+            
+            if (currentWrapper) {
+                currentWrapper.classList.toggle('active');
             }
         });
-    }
+    });
 
-    document.querySelectorAll('.dropdown-item').forEach(item => {
+    // 下拉選單子項目點擊：更新特質與外殼標籤
+    document.querySelectorAll('.dropdown-wrapper .dropdown-item').forEach(item => {
         item.addEventListener('click', (e) => {
             e.stopPropagation(); // 阻止冒泡
             const val = item.dataset.val;
             const displayVal = item.dataset.display || val;
 
+            // 移除所有特質分類的選中狀態
             document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
-            const indChip = document.getElementById('indicators-chip');
-            if (indChip) {
-                indChip.classList.add('active');
-                indChip.setAttribute('data-selected-indicator', val);
+            
+            const wrapper = item.closest('.dropdown-wrapper');
+            const chip = wrapper ? wrapper.querySelector('.category-chip') : null;
+            
+            if (chip) {
+                chip.classList.add('active');
+                if (chip.id === 'indicators-chip') {
+                    chip.setAttribute('data-selected-indicator', val);
+                    const label = chip.querySelector('#selected-indicator-label');
+                    if (label) label.innerText = displayVal;
+                } else if (chip.id === 'languages-chip') {
+                    chip.setAttribute('data-selected-language', val);
+                    const label = chip.querySelector('#selected-language-label');
+                    if (label) label.innerText = displayVal;
+                }
             }
-            document.getElementById('selected-indicator-label').innerText = displayVal;
 
             // 關閉下拉選單
-            const wrapper = item.closest('.dropdown-wrapper');
             if (wrapper) {
                 wrapper.classList.remove('active');
             }
@@ -4838,12 +4862,11 @@ async function initApp() {
         customReasonInput.addEventListener('input', updateTeacherAwardStatus);
     }
 
-    // 點擊頁面其他任何地方時，自動關閉下拉選單
+    // 點擊頁面其他任何地方時，自動關閉所有下拉選單
     document.addEventListener('click', () => {
-        const wrapper = document.querySelector('.dropdown-wrapper');
-        if (wrapper) {
+        document.querySelectorAll('.dropdown-wrapper').forEach(wrapper => {
             wrapper.classList.remove('active');
-        }
+        });
     });
 
     // 教師提交加分 (現在作為自動感應狀態輔助按鈕)
