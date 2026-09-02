@@ -1916,8 +1916,20 @@ function renderStudentProfileKiosk() {
         </div>
     `;
 
-    document.getElementById('profile-signout-btn').addEventListener('click', () => {
+    document.getElementById('profile-signout-btn').addEventListener('click', async () => {
         state.kioskStudent = null;
+        if (state.isFirebase && state.firebaseAuth) {
+            try {
+                const { signOut } = await import("https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js");
+                await signOut(state.firebaseAuth);
+                state.googleUser = null;
+                showToast("已成功登出 Google 帳號與退卡", "success");
+            } catch (e) {
+                console.error("Firebase SignOut error:", e);
+            }
+        } else {
+            state.googleUser = null;
+        }
         renderStudentProfileKiosk();
     });
 }
