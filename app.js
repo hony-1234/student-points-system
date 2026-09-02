@@ -700,6 +700,8 @@ const CardReader = {
                     categoryReason = activeCat.getAttribute('data-selected-indicator');
                 } else if (activeCat.id === 'languages-chip') {
                     categoryReason = activeCat.getAttribute('data-selected-language');
+                } else if (activeCat.id === 'artsports-chip') {
+                    categoryReason = activeCat.getAttribute('data-selected-artsports');
                 } else {
                     categoryReason = activeCat.getAttribute('data-val') || activeCat.innerText.trim();
                 }
@@ -1191,6 +1193,8 @@ function updateTeacherAwardStatus() {
             categoryReason = activeCat.getAttribute('data-selected-indicator');
         } else if (activeCat.id === 'languages-chip') {
             categoryReason = activeCat.getAttribute('data-selected-language');
+        } else if (activeCat.id === 'artsports-chip') {
+            categoryReason = activeCat.getAttribute('data-selected-artsports');
         } else {
             categoryReason = activeCat.getAttribute('data-val') || activeCat.innerText.trim();
         }
@@ -1241,6 +1245,8 @@ function handleTeacherAwardPoints() {
             categoryReason = activeCat.getAttribute('data-selected-indicator');
         } else if (activeCat.id === 'languages-chip') {
             categoryReason = activeCat.getAttribute('data-selected-language');
+        } else if (activeCat.id === 'artsports-chip') {
+            categoryReason = activeCat.getAttribute('data-selected-artsports');
         } else {
             categoryReason = activeCat.getAttribute('data-val') || activeCat.innerText.trim();
         }
@@ -4794,7 +4800,7 @@ async function initApp() {
 
     // 教師加分預設分類綁定 (不包含下拉選單的外殼按鈕)
     document.querySelectorAll('.category-chip').forEach(chip => {
-        if (chip.id === 'indicators-chip' || chip.id === 'languages-chip') return;
+        if (chip.id === 'indicators-chip' || chip.id === 'languages-chip' || chip.id === 'artsports-chip') return;
         
         chip.addEventListener('click', () => {
             document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
@@ -4842,6 +4848,10 @@ async function initApp() {
                 } else if (chip.id === 'languages-chip') {
                     chip.setAttribute('data-selected-language', val);
                     const label = chip.querySelector('#selected-language-label');
+                    if (label) label.innerText = displayVal;
+                } else if (chip.id === 'artsports-chip') {
+                    chip.setAttribute('data-selected-artsports', val);
+                    const label = chip.querySelector('#selected-artsports-label');
                     if (label) label.innerText = displayVal;
                 }
             }
